@@ -4,7 +4,9 @@ const expect = std.testing.expect;
 const fs = std.fs;
 
 const c = @cImport({
-    @cInclude("squashfuse.h"); // squashfuse config file
+    @cInclude("stat.h"); // squashfuse (not system) stat header
+    @cInclude("squashfuse.h");
+    //  @cInclude("config.h");
 });
 
 pub const SquashFsError = error{
@@ -45,7 +47,7 @@ pub const SquashFs = struct {
         if (err != 0) return SquashFsErrorFromInt(err);
 
         // Set version
-        sqfs.version = Version{ .major = 0, .minor = 0 };
+        sqfs.version = .{ .major = 0, .minor = 0 };
         c.sqfs_version(&sqfs.internal, &sqfs.version.major, &sqfs.version.minor);
 
         return sqfs;
@@ -62,38 +64,103 @@ pub const SquashFs = struct {
         return walker;
     }
 
-    //    pub fn lookup(sqfs: *SquashFs, path: [*:0]const u8) !void {
-    //        var entry: c.sqfs_dir_entry = undefined;
+    // Low(ish) level wrapper of `sqfs_read_range`
+    // Should be used for fast reading at the cost of uglier code
+    // Retruns the amount of bytes read
+    pub fn readRange(sqfs: *SquashFs, inode: *c.sqfs_inode, off: c.sqfs_off_t, buf: []u8) !c.sqfs_off_t {
+        // squashfuse writes the amount of bytes read back into the `buffer
+        // length` variable, so we create that here
+        var buf_len = @intCast(c.sqfs_off_t, buf.len);
 
-    //   }
+        const err = c.sqfs_read_range(&sqfs.internal, inode, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
+
+        if (err != 0) return SquashFsErrorFromInt(err);
+
+        return buf_len;
+    }
+
+    // Another small wrapper, this shouldn't be used unless necessary (stuff
+    // missing from the bindings)
+    pub fn getInode(sqfs: *SquashFs, id: c.sqfs_inode_id) !c.sqfs_inode {
+        var inode: c.sqfs_inode = undefined;
+
+        const err = c.sqfs_inode_get(&sqfs.internal, &inode, id);
+
+        if (err != 0) return SquashFsErrorFromInt(err);
+
+        return inode;
+    }
+
+    // Extracts an inode from the SquashFS image to `dest` using the buffer
+    // This should be preferred to `readRange` if the goal is actually to
+    // extract an entire file
+    pub fn extract(sqfs: *SquashFs, buf: []u8, entry: Walker.Entry, dest: []const u8) !void {
+        var inode = try sqfs.getInode(entry.id);
+
+        switch (entry.kind) {
+            .File => {
+                var f = try fs.cwd().createFile(dest, .{});
+                defer f.close();
+
+                var off: c.sqfs_off_t = 0;
+                while (off < inode.xtra.reg.file_size) {
+                    const read_bytes = try sqfs.readRange(&inode, off, buf);
+                    off += read_bytes;
+
+                    _ = try f.write(buf[0..@intCast(u64, read_bytes)]);
+                }
+
+                // Change the mode of the file to match the inode contained in the
+                // SquashFS image
+                const st = try sqfs.stat(&inode);
+                try f.chmod(st.mode);
+            },
+            .Directory => {
+                fs.makeDir(dest);
+            },
+            // TODO: implement for other types
+        }
+    }
+
+    pub fn stat(sqfs: *SquashFs, inode: *c.sqfs_inode) !fs.File.Stat {
+        var st: c.struct_stat = undefined;
+
+        const err = c.sqfs_stat(&sqfs.internal, inode, &st);
+        if (err != 0) return SquashFsErrorFromInt(err);
+
+        return fs.File.Stat.fromSystem(@bitCast(std.os.Stat, st));
+    }
 };
 
 pub const Walker = struct {
     internal: c.sqfs_traverse = undefined,
 
-    pub const WalkerEntry = struct {
-        //    internal: c.sqfs_dir_entry,
+    pub const Entry = struct {
+        id: c.sqfs_inode_id,
 
-        //dir: Dir,
-        basename: [*:0]const u8,
-        path: [*:0]const u8,
+        basename: []const u8,
+        path: []const u8,
         kind: File.Kind,
     };
 
     // This just wraps the squashfuse walk function
-    pub fn next(walker: *Walker) !?WalkerEntry {
-        // TODO: Handle this error
-        var err: u32 = undefined;
+    pub fn next(walker: *Walker) !?Entry {
+        var err: c.sqfs_err = undefined;
 
         // Maybe these values should be passed as a pointer so they don't have
         // to be copied?
         if (c.sqfs_traverse_next(&walker.internal, &err)) {
-            //return { .path = walker.internal.path, .internal = walker.internal.entry, .inode_type = @intToEnum(SquashFsDirType, walker.internal.entry.type) };
-            return WalkerEntry{ .basename = basenameZ(walker.internal.path, walker.internal.path_size), .path = walker.internal.path, .kind = @intToEnum(File.Kind, walker.internal.entry.type) };
+            // Create Zig slice from walker path
+            var path_slice: []const u8 = undefined;
+            path_slice.ptr = walker.internal.path;
+            // Subtract 1 to drop the null char
+            path_slice.len = walker.internal.path_size - 1;
+
+            return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
         }
 
-        if (err != 0) return SquashFsErrorFromInt(err);
         c.sqfs_traverse_close(&walker.internal);
+        if (err != 0) return SquashFsErrorFromInt(err);
 
         // Once `sqfs_traverse_next` stops returning true, we pass null so that
         // this will stop any while loop its put into
@@ -122,27 +189,3 @@ pub const File = struct {
         LUnixDomainSocket,
     };
 };
-
-// Modified `std.fs.path.basename` as the stdlib doesn't contain one for
-// C strings
-pub fn basenameZ(path: [*c]const u8, path_size: usize) [*c]const u8 {
-    if (path_size == 0)
-        return "";
-
-    var end_index: usize = path_size - 1;
-    while (path[end_index] == '/') {
-        if (end_index == 0)
-            return "";
-        end_index -= 1;
-    }
-
-    var start_index: usize = end_index;
-    end_index += 1;
-    while (path[start_index] != '/') {
-        if (start_index == 0)
-            return path[0..end_index].ptr;
-        start_index -= 1;
-    }
-
-    return path[start_index + 1 .. end_index].ptr;
-}
