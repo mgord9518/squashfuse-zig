@@ -6,7 +6,6 @@ const fs = std.fs;
 const c = @cImport({
     @cInclude("stat.h"); // squashfuse (not system) stat header
     @cInclude("squashfuse.h");
-    //  @cInclude("config.h");
 });
 
 pub const SquashFsError = error{
@@ -29,8 +28,8 @@ fn SquashFsErrorFromInt(err: u32) SquashFsError {
 
 pub const SquashFs = struct {
     internal: c.sqfs = undefined,
-
     version: Version = undefined,
+    file: fs.File = undefined,
 
     pub const Version = struct {
         major: i32,
@@ -38,12 +37,12 @@ pub const SquashFs = struct {
     };
 
     // squash_open wrapper
-    pub fn init(path: [*:0]const u8, offset: u64) SquashFsError!SquashFs {
+    pub fn init(path: []const u8, offset: u64) !SquashFs {
         var sqfs = SquashFs{};
 
-        // TODO: implement `sqfs_open_image` in Zig (it just wraps `sqfs_init`)
-        // so that nothing gets annoyingly printed to stdout on failure
-        const err = c.sqfs_open_image(&sqfs.internal, path, offset);
+        sqfs.file = try std.fs.cwd().openFile(path, .{});
+
+        const err = c.sqfs_init(&sqfs.internal, sqfs.file.handle, offset);
         if (err != 0) return SquashFsErrorFromInt(err);
 
         // Set version
@@ -51,6 +50,10 @@ pub const SquashFs = struct {
         c.sqfs_version(&sqfs.internal, &sqfs.version.major, &sqfs.version.minor);
 
         return sqfs;
+    }
+
+    pub fn deinit(sqfs: *SquashFs) void {
+        sqfs.file.close();
     }
 
     // TODO: Actually start walking from the path provided
@@ -67,7 +70,7 @@ pub const SquashFs = struct {
     // Low(ish) level wrapper of `sqfs_read_range`
     // Should be used for fast reading at the cost of uglier code
     // Retruns the amount of bytes read
-    pub fn readRange(sqfs: *SquashFs, inode: *c.sqfs_inode, off: c.sqfs_off_t, buf: []u8) !c.sqfs_off_t {
+    pub fn readRange(sqfs: *SquashFs, inode: *c.sqfs_inode, buf: []u8, off: c.sqfs_off_t) !c.sqfs_off_t {
         // squashfuse writes the amount of bytes read back into the `buffer
         // length` variable, so we create that here
         var buf_len = @intCast(c.sqfs_off_t, buf.len);
@@ -104,7 +107,7 @@ pub const SquashFs = struct {
 
                 var off: c.sqfs_off_t = 0;
                 while (off < inode.xtra.reg.file_size) {
-                    const read_bytes = try sqfs.readRange(&inode, off, buf);
+                    const read_bytes = try sqfs.readRange(&inode, buf, off);
                     off += read_bytes;
 
                     _ = try f.write(buf[0..@intCast(u64, read_bytes)]);
@@ -151,10 +154,7 @@ pub const Walker = struct {
         // to be copied?
         if (c.sqfs_traverse_next(&walker.internal, &err)) {
             // Create Zig slice from walker path
-            var path_slice: []const u8 = undefined;
-            path_slice.ptr = walker.internal.path;
-            // Subtract 1 to drop the null char
-            path_slice.len = walker.internal.path_size - 1;
+            var path_slice: []const u8 = std.mem.span(walker.internal.path);
 
             return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
         }
