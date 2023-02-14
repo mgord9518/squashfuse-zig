@@ -1,3 +1,8 @@
+// NOTE BEFORE BUILDING:
+// The <https://github.com/vasi/squashfuse> repo must be inside this directory,
+// along with running `./autogen.sh` then `./configure` inside it to generate
+// `config.h`
+
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {
@@ -5,10 +10,9 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const lib = b.addStaticLibrary("squash", "src/SquashFs.zig");
+    const lib = b.addStaticLibrary("squashfuse", "src/SquashFs.zig");
     lib.setBuildMode(mode);
     lib.install();
-    lib.linkSystemLibrary("squashfuse");
 
     const main_tests = b.addTest("src/SquashFs.zig");
     main_tests.setBuildMode(mode);

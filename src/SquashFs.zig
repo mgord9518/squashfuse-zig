@@ -1,4 +1,5 @@
 const std = @import("std");
+const os = std.os;
 const span = std.mem.span;
 const expect = std.testing.expect;
 const fs = std.fs;
@@ -46,7 +47,6 @@ pub const SquashFs = struct {
         if (err != 0) return SquashFsErrorFromInt(err);
 
         // Set version
-        sqfs.version = .{ .major = 0, .minor = 0 };
         c.sqfs_version(&sqfs.internal, &sqfs.version.major, &sqfs.version.minor);
 
         return sqfs;
@@ -57,10 +57,10 @@ pub const SquashFs = struct {
     }
 
     // TODO: Actually start walking from the path provided
-    pub fn walk(sqfs: *SquashFs, root: [*:0]const u8) !Walker {
-        var walker = Walker{};
-
+    pub fn walk(sqfs: *SquashFs, root: [:0]const u8) !Walker {
         _ = root;
+        var walker = Walker{ .internal = undefined };
+
         var err = c.sqfs_traverse_open(&walker.internal, &sqfs.internal, sqfs.internal.sb.root_inode);
         if (err != 0) return SquashFsErrorFromInt(err);
 
@@ -93,6 +93,23 @@ pub const SquashFs = struct {
 
         return inode;
     }
+
+    // Haven't been able to get this working, I'll probably just re-implement
+    // it
+    //    pub fn lookup(sqfs: *SquashFs, path: [*:0]const u8) !?c.sqfs_inode {
+    //        var inode: c.sqfs_inode = undefined;
+    //        var found: bool = false;
+    //        _ = path;
+    //
+    //        const err = c.sqfs_lookup_path(&sqfs.internal, &inode, "", &found);
+    //
+    //        std.debug.print("\n{}\n", .{found});
+    //
+    //        if (err != 0) return SquashFsErrorFromInt(err);
+    //        if (!found) return SquashFsErrorFromInt(3);
+    //
+    //        return inode;
+    //    }
 
     // Extracts an inode from the SquashFS image to `dest` using the buffer
     // This should be preferred to `readRange` if the goal is actually to
@@ -133,10 +150,16 @@ pub const SquashFs = struct {
 
         return fs.File.Stat.fromSystem(@bitCast(std.os.Stat, st));
     }
+
+    // Like `SquashFs.stat` but returns the native stat format
+    pub fn statC(sqfs: *SquashFs, inode: *c.sqfs_inode, st: *os.Stat) !void {
+        const err = c.sqfs_stat(&sqfs.internal, inode, @ptrCast(*c.struct_stat, st));
+        if (err != 0) return SquashFsErrorFromInt(err);
+    }
 };
 
 pub const Walker = struct {
-    internal: c.sqfs_traverse = undefined,
+    internal: c.sqfs_traverse,
 
     pub const Entry = struct {
         id: c.sqfs_inode_id,
@@ -148,13 +171,14 @@ pub const Walker = struct {
 
     // This just wraps the squashfuse walk function
     pub fn next(walker: *Walker) !?Entry {
-        var err: c.sqfs_err = undefined;
+        var err: c.sqfs_err = 0;
 
-        // Maybe these values should be passed as a pointer so they don't have
-        // to be copied?
         if (c.sqfs_traverse_next(&walker.internal, &err)) {
-            // Create Zig slice from walker path
-            var path_slice: []const u8 = std.mem.span(walker.internal.path);
+            // Create Zig string from walker path
+            var path_slice: []const u8 = undefined;
+            path_slice.ptr = walker.internal.path;
+            path_slice.len = walker.internal.path_size;
+            //var path_slice = std.mem.span(walker.internal.path);
 
             return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
         }
