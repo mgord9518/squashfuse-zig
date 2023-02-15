@@ -156,60 +156,60 @@ pub const SquashFs = struct {
         const err = c.sqfs_stat(&sqfs.internal, inode, @ptrCast(*c.struct_stat, st));
         if (err != 0) return SquashFsErrorFromInt(err);
     }
-};
 
-pub const Walker = struct {
-    internal: c.sqfs_traverse,
+    pub const Walker = struct {
+        internal: c.sqfs_traverse,
 
-    pub const Entry = struct {
-        id: c.sqfs_inode_id,
+        pub const Entry = struct {
+            id: c.sqfs_inode_id,
 
-        basename: []const u8,
-        path: []const u8,
-        kind: File.Kind,
+            basename: []const u8,
+            path: []const u8,
+            kind: File.Kind,
+        };
+
+        // This just wraps the squashfuse walk function
+        pub fn next(walker: *Walker) !?Entry {
+            var err: c.sqfs_err = 0;
+
+            if (c.sqfs_traverse_next(&walker.internal, &err)) {
+                // Create Zig string from walker path
+                var path_slice: []const u8 = undefined;
+                path_slice.ptr = walker.internal.path;
+                path_slice.len = walker.internal.path_size;
+                //var path_slice = std.mem.span(walker.internal.path);
+
+                return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
+            }
+
+            c.sqfs_traverse_close(&walker.internal);
+            if (err != 0) return SquashFsErrorFromInt(err);
+
+            // Once `sqfs_traverse_next` stops returning true, we pass null so that
+            // this will stop any while loop its put into
+            return null;
+        }
     };
 
-    // This just wraps the squashfuse walk function
-    pub fn next(walker: *Walker) !?Entry {
-        var err: c.sqfs_err = 0;
+    pub const File = struct {
+        pub const Kind = enum(u8) {
+            Directory = 1,
+            File,
+            SymLink,
+            BlockDevice,
+            CharacterDevice,
+            NamedPipe,
+            UnixDomainSocket,
 
-        if (c.sqfs_traverse_next(&walker.internal, &err)) {
-            // Create Zig string from walker path
-            var path_slice: []const u8 = undefined;
-            path_slice.ptr = walker.internal.path;
-            path_slice.len = walker.internal.path_size;
-            //var path_slice = std.mem.span(walker.internal.path);
-
-            return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
-        }
-
-        c.sqfs_traverse_close(&walker.internal);
-        if (err != 0) return SquashFsErrorFromInt(err);
-
-        // Once `sqfs_traverse_next` stops returning true, we pass null so that
-        // this will stop any while loop its put into
-        return null;
-    }
-};
-
-pub const File = struct {
-    pub const Kind = enum(u8) {
-        Directory = 1,
-        File,
-        SymLink,
-        BlockDevice,
-        CharacterDevice,
-        NamedPipe,
-        UnixDomainSocket,
-
-        // Not really sure what these are tbh, but squashfuse has entries for
-        // them
-        LDirectory,
-        LFile,
-        LSymLink,
-        LBlockDevice,
-        LCharacterDevice,
-        LNamedPipe,
-        LUnixDomainSocket,
+            // Not really sure what these are tbh, but squashfuse has entries for
+            // them
+            LDirectory,
+            LFile,
+            LSymLink,
+            LBlockDevice,
+            LCharacterDevice,
+            LNamedPipe,
+            LUnixDomainSocket,
+        };
     };
 };
