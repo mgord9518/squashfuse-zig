@@ -27,6 +27,8 @@ fn SquashFsErrorFromInt(err: u32) SquashFsError {
     }
 }
 
+pub const Inode = c.sqfs_inode;
+
 pub const SquashFs = struct {
     internal: c.sqfs = undefined,
     version: Version = undefined,
@@ -70,7 +72,7 @@ pub const SquashFs = struct {
     // Low(ish) level wrapper of `sqfs_read_range`
     // Should be used for fast reading at the cost of uglier code
     // Retruns the amount of bytes read
-    pub fn readRange(sqfs: *SquashFs, inode: *c.sqfs_inode, buf: []u8, off: c.sqfs_off_t) !c.sqfs_off_t {
+    pub fn readRange(sqfs: *SquashFs, inode: *Inode, buf: []u8, off: usize) !usize {
         // squashfuse writes the amount of bytes read back into the `buffer
         // length` variable, so we create that here
         var buf_len = @intCast(c.sqfs_off_t, buf.len);
@@ -79,13 +81,13 @@ pub const SquashFs = struct {
 
         if (err != 0) return SquashFsErrorFromInt(err);
 
-        return buf_len;
+        return @intCast(usize, buf_len);
     }
 
     // Another small wrapper, this shouldn't be used unless necessary (stuff
     // missing from the bindings)
-    pub fn getInode(sqfs: *SquashFs, id: c.sqfs_inode_id) !c.sqfs_inode {
-        var inode: c.sqfs_inode = undefined;
+    pub fn getInode(sqfs: *SquashFs, id: c.sqfs_inode_id) !Inode {
+        var inode: Inode = undefined;
 
         const err = c.sqfs_inode_get(&sqfs.internal, &inode, id);
 
@@ -122,12 +124,13 @@ pub const SquashFs = struct {
                 var f = try fs.cwd().createFile(dest, .{});
                 defer f.close();
 
-                var off: c.sqfs_off_t = 0;
-                while (off < inode.xtra.reg.file_size) {
+                var off: usize = 0;
+                const fsize = @intCast(usize, inode.xtra.reg.file_size);
+                while (off < fsize) {
                     const read_bytes = try sqfs.readRange(&inode, buf, off);
                     off += read_bytes;
 
-                    _ = try f.write(buf[0..@intCast(u64, read_bytes)]);
+                    _ = try f.write(buf[0..read_bytes]);
                 }
 
                 // Change the mode of the file to match the inode contained in the
@@ -142,7 +145,7 @@ pub const SquashFs = struct {
         }
     }
 
-    pub fn stat(sqfs: *SquashFs, inode: *c.sqfs_inode) !fs.File.Stat {
+    pub fn stat(sqfs: *SquashFs, inode: *Inode) !fs.File.Stat {
         var st: c.struct_stat = undefined;
 
         const err = c.sqfs_stat(&sqfs.internal, inode, &st);
@@ -152,9 +155,13 @@ pub const SquashFs = struct {
     }
 
     // Like `SquashFs.stat` but returns the native stat format
-    pub fn statC(sqfs: *SquashFs, inode: *c.sqfs_inode, st: *os.Stat) !void {
+    pub fn statC(sqfs: *SquashFs, inode: *Inode, st: *os.Stat) !void {
         const err = c.sqfs_stat(&sqfs.internal, inode, @ptrCast(*c.struct_stat, st));
         if (err != 0) return SquashFsErrorFromInt(err);
+    }
+
+    pub fn readlink(sqfs: *SquashFs, inode: *Inode, buf: [*:0]u8, size: *usize) c_uint {
+        return c.sqfs_readlink(&sqfs.internal, inode, buf, size);
     }
 
     pub const Walker = struct {
