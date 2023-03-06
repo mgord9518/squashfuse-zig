@@ -17,17 +17,20 @@ pub const SquashFsError = error{
     UnsupportedFeature, // Unsupported feature
 };
 
-fn SquashFsErrorFromInt(err: u32) SquashFsError {
-    switch (err) {
-        2 => return SquashFsError.InvalidFormat,
-        3 => return SquashFsError.InvalidVersion,
-        4 => return SquashFsError.InvalidCompression,
-        5 => return SquashFsError.UnsupportedFeature,
-        else => return SquashFsError.Error,
-    }
+// Converts a C error code to a Zig error enum
+fn SquashFsErrorFromInt(err: c_uint) SquashFsError!void {
+    return switch (err) {
+        0 => {},
+        2 => SquashFsError.InvalidFormat,
+        3 => SquashFsError.InvalidVersion,
+        4 => SquashFsError.InvalidCompression,
+        5 => SquashFsError.UnsupportedFeature,
+        else => SquashFsError.Error,
+    };
 }
 
 pub const Inode = c.sqfs_inode;
+pub const InodeId = c.sqfs_inode_id;
 
 pub const SquashFs = struct {
     internal: c.sqfs = undefined,
@@ -39,14 +42,12 @@ pub const SquashFs = struct {
         minor: i32,
     };
 
-    // squash_open wrapper
     pub fn init(path: []const u8, offset: u64) !SquashFs {
         var sqfs = SquashFs{};
 
         sqfs.file = try std.fs.cwd().openFile(path, .{});
 
-        const err = c.sqfs_init(&sqfs.internal, sqfs.file.handle, offset);
-        if (err != 0) return SquashFsErrorFromInt(err);
+        try SquashFsErrorFromInt(c.sqfs_init(&sqfs.internal, sqfs.file.handle, offset));
 
         // Set version
         c.sqfs_version(&sqfs.internal, &sqfs.version.major, &sqfs.version.minor);
@@ -64,14 +65,14 @@ pub const SquashFs = struct {
         var walker = Walker{ .internal = undefined };
 
         var err = c.sqfs_traverse_open(&walker.internal, &sqfs.internal, sqfs.internal.sb.root_inode);
-        if (err != 0) return SquashFsErrorFromInt(err);
+        try SquashFsErrorFromInt(err);
 
         return walker;
     }
 
-    // Low(ish) level wrapper of `sqfs_read_range`
-    // Should be used for fast reading at the cost of uglier code
-    // Retruns the amount of bytes read
+    /// Wrapper of `sqfs_read_range`
+    /// Use for reading one byte buffer at a time
+    /// Retruns the amount of bytes read
     pub fn readRange(sqfs: *SquashFs, inode: *Inode, buf: []u8, off: usize) !usize {
         // squashfuse writes the amount of bytes read back into the `buffer
         // length` variable, so we create that here
@@ -79,19 +80,17 @@ pub const SquashFs = struct {
 
         const err = c.sqfs_read_range(&sqfs.internal, inode, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
 
-        if (err != 0) return SquashFsErrorFromInt(err);
+        try SquashFsErrorFromInt(err);
 
         return @intCast(usize, buf_len);
     }
 
     // Another small wrapper, this shouldn't be used unless necessary (stuff
     // missing from the bindings)
-    pub fn getInode(sqfs: *SquashFs, id: c.sqfs_inode_id) !Inode {
+    pub fn getInode(sqfs: *SquashFs, id: InodeId) !Inode {
         var inode: Inode = undefined;
 
-        const err = c.sqfs_inode_get(&sqfs.internal, &inode, id);
-
-        if (err != 0) return SquashFsErrorFromInt(err);
+        try SquashFsErrorFromInt(c.sqfs_inode_get(&sqfs.internal, &inode, id));
 
         return inode;
     }
@@ -148,8 +147,7 @@ pub const SquashFs = struct {
     pub fn stat(sqfs: *SquashFs, inode: *Inode) !fs.File.Stat {
         var st: c.struct_stat = undefined;
 
-        const err = c.sqfs_stat(&sqfs.internal, inode, &st);
-        if (err != 0) return SquashFsErrorFromInt(err);
+        try SquashFsErrorFromInt(c.sqfs_stat(&sqfs.internal, inode, &st));
 
         return fs.File.Stat.fromSystem(@bitCast(std.os.Stat, st));
     }
@@ -157,7 +155,7 @@ pub const SquashFs = struct {
     // Like `SquashFs.stat` but returns the native stat format
     pub fn statC(sqfs: *SquashFs, inode: *Inode, st: *os.Stat) !void {
         const err = c.sqfs_stat(&sqfs.internal, inode, @ptrCast(*c.struct_stat, st));
-        if (err != 0) return SquashFsErrorFromInt(err);
+        try SquashFsErrorFromInt(err);
     }
 
     pub fn readlink(sqfs: *SquashFs, inode: *Inode, buf: [*:0]u8, size: *usize) c_uint {
@@ -168,7 +166,7 @@ pub const SquashFs = struct {
         internal: c.sqfs_traverse,
 
         pub const Entry = struct {
-            id: c.sqfs_inode_id,
+            id: InodeId,
 
             basename: []const u8,
             path: []const u8,
@@ -190,7 +188,7 @@ pub const SquashFs = struct {
             }
 
             c.sqfs_traverse_close(&walker.internal);
-            if (err != 0) return SquashFsErrorFromInt(err);
+            try SquashFsErrorFromInt(err);
 
             // Once `sqfs_traverse_next` stops returning true, we pass null so that
             // this will stop any while loop its put into
