@@ -25,11 +25,12 @@ fn SquashFsErrorFromInt(err: c_uint) SquashFsError!void {
         3 => SquashFsError.InvalidVersion,
         4 => SquashFsError.InvalidCompression,
         5 => SquashFsError.UnsupportedFeature,
+
         else => SquashFsError.Error,
     };
 }
 
-pub const Inode = c.sqfs_inode;
+//pub const Inode = c.sqfs_inode;
 pub const InodeId = c.sqfs_inode_id;
 
 pub const SquashFs = struct {
@@ -55,7 +56,7 @@ pub const SquashFs = struct {
         return sqfs;
     }
 
-    pub fn deinit(sqfs: *SquashFs) void {
+    pub inline fn deinit(sqfs: *SquashFs) void {
         sqfs.file.close();
     }
 
@@ -72,45 +73,28 @@ pub const SquashFs = struct {
 
     /// Wrapper of `sqfs_read_range`
     /// Use for reading one byte buffer at a time
-    /// Retruns the amount of bytes read
-    pub fn readRange(sqfs: *SquashFs, inode: *Inode, buf: []u8, off: usize) !usize {
+    /// Retruns a slice of the read bytes
+    pub fn readRange(sqfs: *SquashFs, inode: *Inode, buf: []u8, off: usize) ![]u8 {
         // squashfuse writes the amount of bytes read back into the `buffer
         // length` variable, so we create that here
         var buf_len = @intCast(c.sqfs_off_t, buf.len);
 
-        const err = c.sqfs_read_range(&sqfs.internal, inode, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
+        const err = c.sqfs_read_range(&sqfs.internal, &inode.internal, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
 
         try SquashFsErrorFromInt(err);
 
-        return @intCast(usize, buf_len);
+        return buf[0..@intCast(usize, buf_len)];
     }
 
     // Another small wrapper, this shouldn't be used unless necessary (stuff
     // missing from the bindings)
-    pub fn getInode(sqfs: *SquashFs, id: InodeId) !Inode {
-        var inode: Inode = undefined;
+    pub inline fn getInode(sqfs: *SquashFs, id: InodeId) !Inode {
+        var sqfs_inode: c.sqfs_inode = undefined;
 
-        try SquashFsErrorFromInt(c.sqfs_inode_get(&sqfs.internal, &inode, id));
+        try SquashFsErrorFromInt(c.sqfs_inode_get(&sqfs.internal, &sqfs_inode, id));
 
-        return inode;
+        return Inode{ .internal = sqfs_inode, .parent = sqfs };
     }
-
-    // Haven't been able to get this working, I'll probably just re-implement
-    // it
-    //    pub fn lookup(sqfs: *SquashFs, path: [*:0]const u8) !?c.sqfs_inode {
-    //        var inode: c.sqfs_inode = undefined;
-    //        var found: bool = false;
-    //        _ = path;
-    //
-    //        const err = c.sqfs_lookup_path(&sqfs.internal, &inode, "", &found);
-    //
-    //        std.debug.print("\n{}\n", .{found});
-    //
-    //        if (err != 0) return SquashFsErrorFromInt(err);
-    //        if (!found) return SquashFsErrorFromInt(3);
-    //
-    //        return inode;
-    //    }
 
     // Extracts an inode from the SquashFS image to `dest` using the buffer
     // This should be preferred to `readRange` if the goal is actually to
@@ -137,6 +121,7 @@ pub const SquashFs = struct {
                 const st = try sqfs.stat(&inode);
                 try f.chmod(st.mode);
             },
+            // TODO: extract recursively
             .Directory => {
                 fs.makeDir(dest);
             },
@@ -144,23 +129,32 @@ pub const SquashFs = struct {
         }
     }
 
-    pub fn stat(sqfs: *SquashFs, inode: *Inode) !fs.File.Stat {
-        var st: c.struct_stat = undefined;
+    pub const Inode = struct {
+        internal: c.sqfs_inode,
+        parent: *SquashFs,
 
-        try SquashFsErrorFromInt(c.sqfs_stat(&sqfs.internal, inode, &st));
+        pub fn readLink(self: *Inode, buf: []u8) !void {
+            var size = buf.len;
 
-        return fs.File.Stat.fromSystem(@bitCast(std.os.Stat, st));
-    }
+            try SquashFsErrorFromInt(c.sqfs_readlink(&self.parent.internal, &self.internal, buf.ptr, &size));
+        }
 
-    // Like `SquashFs.stat` but returns the native stat format
-    pub fn statC(sqfs: *SquashFs, inode: *Inode, st: *os.Stat) !void {
-        const err = c.sqfs_stat(&sqfs.internal, inode, @ptrCast(*c.struct_stat, st));
-        try SquashFsErrorFromInt(err);
-    }
+        pub inline fn stat(self: *Inode) !fs.File.Stat {
+            const st = try self.statC(self.internal);
 
-    pub fn readlink(sqfs: *SquashFs, inode: *Inode, buf: [*:0]u8, size: *usize) c_uint {
-        return c.sqfs_readlink(&sqfs.internal, inode, buf, size);
-    }
+            return fs.File.Stat.fromSystem(st);
+        }
+
+        // Like `Inode.stat` but returns the native stat format
+        pub fn statC(self: *Inode) !os.Stat {
+            var st = std.mem.zeroes(os.Stat);
+
+            const err = c.sqfs_stat(&self.parent.internal, &self.internal, @ptrCast(*c.struct_stat, &st));
+            try SquashFsErrorFromInt(err);
+
+            return st;
+        }
+    };
 
     pub const Walker = struct {
         internal: c.sqfs_traverse,
@@ -179,10 +173,7 @@ pub const SquashFs = struct {
 
             if (c.sqfs_traverse_next(&walker.internal, &err)) {
                 // Create Zig string from walker path
-                var path_slice: []const u8 = undefined;
-                path_slice.ptr = walker.internal.path;
-                path_slice.len = walker.internal.path_size;
-                //var path_slice = std.mem.span(walker.internal.path);
+                var path_slice = walker.internal.path[0..walker.internal.path_size];
 
                 return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
             }
