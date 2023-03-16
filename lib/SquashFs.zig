@@ -162,20 +162,22 @@ pub const SquashFs = struct {
         pub const Entry = struct {
             id: InodeId,
 
-            basename: []const u8,
-            path: []const u8,
+            path: [:0]const u8,
             kind: File.Kind,
         };
 
-        // This just wraps the squashfuse walk function
+        /// This just wraps the `sqfs_traverse_next` function
+        /// squashfuse automatically cleans up the path pointer on each
+        /// iteration, which makes sense, but this means if you want to
+        /// use any path after the fact you must copy it yourself
         pub fn next(walker: *Walker) !?Entry {
             var err: c.sqfs_err = 0;
 
             if (c.sqfs_traverse_next(&walker.internal, &err)) {
-                // Create Zig string from walker path
-                var path_slice = walker.internal.path[0..walker.internal.path_size];
+                const kind = @intToEnum(File.Kind, walker.internal.entry.type);
+                const path = walker.internal.path[0 .. walker.internal.path_size - 1 :0];
 
-                return .{ .basename = fs.path.basename(path_slice), .path = path_slice, .kind = @intToEnum(File.Kind, walker.internal.entry.type), .id = walker.internal.entry.inode };
+                return .{ .path = path, .kind = kind, .id = walker.internal.entry.inode };
             }
 
             c.sqfs_traverse_close(&walker.internal);
