@@ -1,0 +1,1 @@
+vendored stripped-down squashfuse

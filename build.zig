@@ -1,8 +1,3 @@
-// NOTE BEFORE BUILDING:
-// The <https://github.com/vasi/squashfuse> repo must be inside this directory,
-// along with running `./autogen.sh` then `./configure` inside it to generate
-// `config.h`
-
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {

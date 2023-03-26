@@ -7,6 +7,21 @@ const fs = std.fs;
 const c = @cImport({
     @cInclude("stat.h"); // squashfuse (not system) stat header
     @cInclude("squashfuse.h");
+    @cInclude("common.h");
+
+    @cInclude("cache.c");
+    //@cInclude("decompress.c");
+    @cInclude("dir.c");
+    @cInclude("file.c");
+    //@cInclude("fs.c");
+    @cInclude("nonstd-makedev.c");
+    //@cInclude("nonstd-stat.c");
+    @cInclude("stat.c");
+    @cInclude("stack.c");
+    @cInclude("swap.c");
+    //@cInclude("table.c");
+    //@cInclude("util.c");
+    //@cInclude("xattr.c");
 });
 
 pub const SquashFsError = error{
@@ -30,7 +45,6 @@ fn SquashFsErrorFromInt(err: c_uint) SquashFsError!void {
     };
 }
 
-//pub const Inode = c.sqfs_inode;
 pub const InodeId = c.sqfs_inode_id;
 
 pub const SquashFs = struct {
@@ -43,7 +57,8 @@ pub const SquashFs = struct {
         minor: i32,
     };
 
-    pub fn init(path: []const u8, offset: u64) !SquashFs {
+    pub fn init(allocator: std.mem.Allocator, path: []const u8, offset: u64) !SquashFs {
+        _ = allocator;
         var sqfs = SquashFs{};
 
         sqfs.file = try std.fs.cwd().openFile(path, .{});
@@ -57,33 +72,8 @@ pub const SquashFs = struct {
     }
 
     pub inline fn deinit(sqfs: *SquashFs) void {
+        c.sqfs_destroy(&sqfs.internal);
         sqfs.file.close();
-    }
-
-    // TODO: Actually start walking from the path provided
-    pub fn walk(sqfs: *SquashFs, root: [:0]const u8) !Walker {
-        _ = root;
-        var walker = Walker{ .internal = undefined };
-
-        var err = c.sqfs_traverse_open(&walker.internal, &sqfs.internal, sqfs.internal.sb.root_inode);
-        try SquashFsErrorFromInt(err);
-
-        return walker;
-    }
-
-    /// Wrapper of `sqfs_read_range`
-    /// Use for reading one byte buffer at a time
-    /// Retruns a slice of the read bytes
-    pub fn readRange(sqfs: *SquashFs, inode: *Inode, buf: []u8, off: usize) ![]u8 {
-        // squashfuse writes the amount of bytes read back into the `buffer
-        // length` variable, so we create that here
-        var buf_len = @intCast(c.sqfs_off_t, buf.len);
-
-        const err = c.sqfs_read_range(&sqfs.internal, &inode.internal, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
-
-        try SquashFsErrorFromInt(err);
-
-        return buf[0..@intCast(usize, buf_len)];
     }
 
     // Another small wrapper, this shouldn't be used unless necessary (stuff
@@ -93,59 +83,49 @@ pub const SquashFs = struct {
 
         try SquashFsErrorFromInt(c.sqfs_inode_get(&sqfs.internal, &sqfs_inode, id));
 
-        return Inode{ .internal = sqfs_inode, .parent = sqfs };
-    }
-
-    // Extracts an inode from the SquashFS image to `dest` using the buffer
-    // This should be preferred to `readRange` if the goal is actually to
-    // extract an entire file
-    pub fn extract(sqfs: *SquashFs, buf: []u8, entry: Walker.Entry, dest: []const u8) !void {
-        var inode = try sqfs.getInode(entry.id);
-
-        switch (entry.kind) {
-            .File => {
-                var f = try fs.cwd().createFile(dest, .{});
-                defer f.close();
-
-                var off: usize = 0;
-                const fsize = @intCast(usize, inode.xtra.reg.file_size);
-                while (off < fsize) {
-                    const read_bytes = try sqfs.readRange(&inode, buf, off);
-                    off += read_bytes;
-
-                    _ = try f.write(buf[0..read_bytes]);
-                }
-
-                // Change the mode of the file to match the inode contained in the
-                // SquashFS image
-                const st = try sqfs.stat(&inode);
-                try f.chmod(st.mode);
-            },
-            // TODO: extract recursively
-            .Directory => {
-                fs.makeDir(dest);
-            },
-            // TODO: implement for other types
-        }
+        return Inode{ .internal = sqfs_inode, .parent = sqfs, .kind = @intToEnum(File.Kind, sqfs_inode.base.inode_type) };
     }
 
     pub const Inode = struct {
         internal: c.sqfs_inode,
         parent: *SquashFs,
+        kind: File.Kind,
 
+        /// Reads the link target into `buf`
         pub fn readLink(self: *Inode, buf: []u8) !void {
             var size = buf.len;
 
             try SquashFsErrorFromInt(c.sqfs_readlink(&self.parent.internal, &self.internal, buf.ptr, &size));
         }
 
+        /// Wrapper of `sqfs_read_range`
+        /// Use for reading one byte buffer at a time
+        /// Retruns a slice of the read bytes
+        pub fn read(self: *Inode, buf: []u8, off: usize) !usize {
+            // squashfuse writes the amount of bytes read back into the `buffer
+            // length` variable, so we create that here
+            var buf_len = @intCast(c.sqfs_off_t, buf.len);
+
+            const err = c.sqfs_read_range(&self.parent.internal, &self.internal, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
+
+            try SquashFsErrorFromInt(err);
+
+            return @intCast(usize, buf_len);
+        }
+
+        pub const Reader = std.io.Reader(Inode, std.os.ReadError, read);
+
+        pub fn reader(self: *Inode) Reader {
+            return .{ .context = self };
+        }
+
         pub inline fn stat(self: *Inode) !fs.File.Stat {
-            const st = try self.statC(self.internal);
+            const st = try self.statC();
 
             return fs.File.Stat.fromSystem(st);
         }
 
-        // Like `Inode.stat` but returns the native stat format
+        // Like `Inode.stat` but returns the OS native stat format
         pub fn statC(self: *Inode) !os.Stat {
             var st = std.mem.zeroes(os.Stat);
 
@@ -154,38 +134,197 @@ pub const SquashFs = struct {
 
             return st;
         }
-    };
 
-    pub const Walker = struct {
-        internal: c.sqfs_traverse,
+        pub fn iterate(self: *Inode) !Iterator {
+            // TODO: error handling
+            // squashfuse already does errors, which get caught by
+            // `SquashFsErrorFromInt` but it's probably better to handle them
+            // in Zig as I plan on slowly reimplementing a lot of functions
+            //if (self.kind != .Directory)
 
-        pub const Entry = struct {
-            id: InodeId,
+            // Open dir
+            // TODO: add offset
+            var dir: c.sqfs_dir = undefined;
+            try SquashFsErrorFromInt(c.sqfs_dir_open(&self.parent.internal, &self.internal, &dir, 0));
 
-            path: [:0]const u8,
-            kind: File.Kind,
+            return .{ .dir = self.*, .internal = dir, .parent = self.parent };
+        }
+
+        pub const Iterator = struct {
+            dir: Inode,
+            internal: c.sqfs_dir,
+            parent: *SquashFs,
+
+            pub const Entry = struct {
+                id: InodeId,
+                parent: *SquashFs,
+
+                name: []const u8,
+                kind: File.Kind,
+
+                pub inline fn inode(self: *const Entry) Inode {
+                    var sqfs_inode: c.sqfs_inode = undefined;
+
+                    // This should never fail
+                    // if it does, something went very wrong (like messing with
+                    // the inode ID)
+                    const err = c.sqfs_inode_get(&self.parent.internal, &sqfs_inode, self.id);
+                    if (err != 0) unreachable;
+
+                    return Inode{ .internal = sqfs_inode, .parent = self.parent, .kind = self.kind };
+                }
+            };
+
+            /// Wraps `sqfs_dir_next`
+            /// Returns an entry for the next inode in the directory
+            pub fn next(self: *Iterator) !?Entry {
+                // Initialize an entry and its name buffer
+                var sqfs_dir_entry: c.sqfs_dir_entry = undefined;
+                var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                sqfs_dir_entry.name = &buf;
+
+                var err: c.sqfs_err = undefined;
+
+                const found = c.sqfs_dir_next(&self.parent.internal, &self.internal, &sqfs_dir_entry, &err);
+                try SquashFsErrorFromInt(err);
+
+                if (!found) return null;
+
+                return .{ .id = sqfs_dir_entry.inode, .name = sqfs_dir_entry.name[0..sqfs_dir_entry.name_size], .kind = @intToEnum(File.Kind, sqfs_dir_entry.type), .parent = self.parent };
+            }
         };
 
-        /// This just wraps the `sqfs_traverse_next` function
-        /// squashfuse automatically cleans up the path pointer on each
-        /// iteration, which makes sense, but this means if you want to
-        /// use any path after the fact you must copy it yourself
-        pub fn next(walker: *Walker) !?Entry {
-            var err: c.sqfs_err = 0;
+        pub fn walk(self: *Inode, allocator: std.mem.Allocator) !Walker {
+            var name_buffer = std.ArrayList(u8).init(allocator);
+            errdefer name_buffer.deinit();
 
-            if (c.sqfs_traverse_next(&walker.internal, &err)) {
-                const kind = @intToEnum(File.Kind, walker.internal.entry.type);
-                const path = walker.internal.path[0 .. walker.internal.path_size - 1 :0];
+            var stack = std.ArrayList(Walker.StackItem).init(allocator);
+            errdefer stack.deinit();
 
-                return .{ .path = path, .kind = kind, .id = walker.internal.entry.inode };
+            try stack.append(Walker.StackItem{
+                .iter = try self.iterate(),
+                .dirname_len = 0,
+            });
+
+            return Walker{
+                .stack = stack,
+                .name_buffer = name_buffer,
+            };
+        }
+
+        pub const Walker = struct {
+            stack: std.ArrayList(StackItem),
+            name_buffer: std.ArrayList(u8),
+
+            const StackItem = struct {
+                iter: Inode.Iterator,
+                dirname_len: usize,
+            };
+
+            pub const Entry = struct {
+                id: InodeId,
+                parent: *SquashFs,
+
+                dir: Inode,
+                kind: File.Kind,
+                path: []const u8,
+                basename: []const u8,
+
+                pub inline fn inode(self: *const Entry) Inode {
+                    var sqfs_inode: c.sqfs_inode = undefined;
+
+                    // This should never fail
+                    // if it does, something went very wrong
+                    const err = c.sqfs_inode_get(&self.parent.internal, &sqfs_inode, self.id);
+                    if (err != 0) unreachable;
+
+                    return Inode{ .internal = sqfs_inode, .parent = self.parent, .kind = self.kind };
+                }
+            };
+
+            // Copied and slightly modified from Zig stdlib
+            // <https://github.com/ziglang/zig/blob/master/lib/std/fs.zig>
+            pub fn next(self: *Walker) !?Entry {
+                while (self.stack.items.len != 0) {
+                    // `top` and `containing` become invalid after appending to `self.stack`
+                    var top = &self.stack.items[self.stack.items.len - 1];
+                    var containing = top;
+                    var dirname_len = top.dirname_len;
+
+                    if (try top.iter.next()) |entry| {
+                        self.name_buffer.shrinkRetainingCapacity(dirname_len);
+
+                        if (self.name_buffer.items.len != 0) {
+                            try self.name_buffer.append(std.fs.path.sep);
+                            dirname_len += 1;
+                        }
+
+                        try self.name_buffer.appendSlice(entry.name);
+
+                        if (entry.kind == .Directory) {
+                            var new_dir = entry.inode();
+                            {
+                                try self.stack.append(StackItem{
+                                    .iter = try new_dir.iterate(),
+                                    .dirname_len = self.name_buffer.items.len,
+                                });
+                                top = &self.stack.items[self.stack.items.len - 1];
+                                containing = &self.stack.items[self.stack.items.len - 2];
+                            }
+                        }
+
+                        return .{
+                            .dir = containing.iter.dir,
+                            .basename = self.name_buffer.items[dirname_len..],
+                            .id = entry.id,
+                            .parent = entry.parent,
+                            .path = self.name_buffer.items,
+                            .kind = entry.kind,
+                        };
+                    }
+
+                    _ = self.stack.pop();
+                }
+
+                return null;
             }
 
-            c.sqfs_traverse_close(&walker.internal);
-            try SquashFsErrorFromInt(err);
+            pub fn deinit(self: *Walker) void {
+                self.stack.deinit();
+                self.name_buffer.deinit();
+            }
+        };
 
-            // Once `sqfs_traverse_next` stops returning true, we pass null so that
-            // this will stop any while loop its put into
-            return null;
+        /// Extracts an inode from the SquashFS image to `dest` using the buffer
+        pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
+            switch (self.kind) {
+                .File => {
+                    var f = try fs.cwd().createFile(dest, .{});
+                    defer f.close();
+
+                    var off: usize = 0;
+                    const fsize = @intCast(usize, self.internal.xtra.reg.file_size);
+                    while (off < fsize) {
+                        const read_bytes = try self.read(buf, off);
+                        off += read_bytes;
+
+                        _ = try f.write(buf[0..read_bytes]);
+                    }
+
+                    // Change the mode of the file to match the inode contained in the
+                    // SquashFS image
+                    const st = try self.stat();
+                    try f.chmod(st.mode);
+                },
+
+                // TODO: extract recursively
+                .Directory => {
+                    try fs.cwd().makeDir(dest);
+                },
+
+                // TODO: implement for other types
+                else => @panic("NEI for file type"),
+            }
         }
     };
 
