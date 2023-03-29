@@ -1,10 +1,5 @@
-/* config.h.  Generated from config.h.in by configure.  */
-/* config.h.in.  Generated from configure.ac by autoheader.  */
-
-
 #ifndef SQFS_CONFIG_H
 #define SQFS_CONFIG_H
-
 
 /* Version of FUSE API to use */
 #define FUSE_USE_VERSION 32
@@ -96,9 +91,6 @@
 
 /* Define to 1 if you have the <zstd.h> header file. */
 #define HAVE_ZSTD_H 1
-
-/* Define to the sub-directory where libtool stores uninstalled libraries. */
-#define LT_OBJDIR ".libs/"
 
 /* Extra definition needed by non-POSIX daemon */
 /* #undef NONSTD_DAEMON_DEF */

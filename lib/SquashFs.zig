@@ -5,23 +5,10 @@ const expect = std.testing.expect;
 const fs = std.fs;
 
 const c = @cImport({
+    @cInclude("sys/stat.h");
     @cInclude("stat.h"); // squashfuse (not system) stat header
     @cInclude("squashfuse.h");
     @cInclude("common.h");
-
-    @cInclude("cache.c");
-    //@cInclude("decompress.c");
-    @cInclude("dir.c");
-    @cInclude("file.c");
-    //@cInclude("fs.c");
-    @cInclude("nonstd-makedev.c");
-    //@cInclude("nonstd-stat.c");
-    @cInclude("stat.c");
-    @cInclude("stack.c");
-    @cInclude("swap.c");
-    //@cInclude("table.c");
-    //@cInclude("util.c");
-    //@cInclude("xattr.c");
 });
 
 pub const SquashFsError = error{
@@ -48,9 +35,9 @@ fn SquashFsErrorFromInt(err: c_uint) SquashFsError!void {
 pub const InodeId = c.sqfs_inode_id;
 
 pub const SquashFs = struct {
-    internal: c.sqfs = undefined,
-    version: Version = undefined,
-    file: fs.File = undefined,
+    internal: c.sqfs,
+    version: Version,
+    file: fs.File,
 
     pub const Version = struct {
         major: i32,
@@ -59,10 +46,13 @@ pub const SquashFs = struct {
 
     pub fn init(allocator: std.mem.Allocator, path: []const u8, offset: u64) !SquashFs {
         _ = allocator;
-        var sqfs = SquashFs{};
+        var sqfs = SquashFs{
+            .internal = undefined,
+            .version = undefined,
+            .file = try std.fs.cwd().openFile(path, .{}),
+        };
 
-        sqfs.file = try std.fs.cwd().openFile(path, .{});
-
+        // Populate internal squashfuse struct
         try SquashFsErrorFromInt(c.sqfs_init(&sqfs.internal, sqfs.file.handle, offset));
 
         // Set version

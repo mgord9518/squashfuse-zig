@@ -1,0 +1,15 @@
+[submodule "libdeflate"]
+	path = libdeflate
+	url = https://github.com/ebiggers/libdeflate
+[submodule "zstd"]
+	path = zstd
+	url = https://github.com/facebook/zstd
+[submodule "lz4"]
+	path = lz4
+	url = https://github.com/lz4/lz4
+[submodule "xz"]
+	path = xz
+	url = https://github.com/xz-mirror/xz
+[submodule "libfuse"]
+	path = libfuse
+	url = https://github.com/mgord9518/libfuse
