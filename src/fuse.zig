@@ -38,14 +38,19 @@ pub fn FuseErrorFromInt(err: c_int) FuseError!void {
 
 extern fn fuse_main_real(argc: c_int, argv: [*]const [*:0]const u8, op: *const Operations, op_size: usize, private_data: *const anyopaque) c_int;
 pub fn main(allocator: std.mem.Allocator, args: []const [:0]const u8, op: *const Operations, private_data: anytype) !void {
-    var result = try allocator.alloc([*]const u8, args.len + 1);
+    var result = try allocator.alloc([*:0]const u8, args.len);
 
     // Iterate through the slice and convert it to a C char**
     for (args, 0..) |arg, idx| {
-        result[idx] = @ptrCast([*:0]const u8, arg.ptr);
+        result[idx] = arg.ptr;
     }
 
-    try FuseErrorFromInt(fuse_main_real(@intCast(c_int, args.len), result.ptr, op, @sizeOf(Operations), @ptrCast(*const anyopaque, &private_data)));
+    const argc = @intCast(c_int, args.len);
+    const op_len = @sizeOf(Operations);
+    const data_ptr = @ptrCast(*const anyopaque, &private_data);
+
+    const err = fuse_main_real(argc, result.ptr, op, op_len, data_ptr);
+    try FuseErrorFromInt(err);
 }
 
 pub inline fn context() *Context {

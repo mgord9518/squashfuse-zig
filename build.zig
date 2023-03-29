@@ -22,7 +22,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addIncludePath("libdeflate");
     exe.addIncludePath("squashfuse");
 
-    const squashfuse_mod = b.addModule("squashfuse", .{ .source_file = .{ .path = "../squashfuse-zig/lib.zig" } });
+    const squashfuse_mod = b.addModule("squashfuse", .{ .source_file = .{ .path = "lib.zig" } });
 
     exe.addModule("squashfuse", squashfuse_mod);
 
