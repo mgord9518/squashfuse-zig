@@ -36,7 +36,7 @@ jobs:
       run: |
         cd xz
         ./autogen.sh
-        ./configure
+        ./configure --disable-xz --disable-doc
         make CFLAGS='-O3'
 
     - name: Build (x86_64)
