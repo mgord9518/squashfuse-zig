@@ -1,0 +1,48 @@
+name: Automatic build
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    steps:
+    - uses: actions/checkout@v2
+    - uses: goto-bus-stop/setup-zig@v2
+
+    - name: Install deps
+      run: sudo apt install libfuse-dev liblzo2-dev meson ninja
+      
+    - name: Build FUSE3
+      run: |
+        cd libfuse
+        mkdir build
+        cd build
+        meson -Ddefault_library=static
+        meson ..
+        ninja
+        cd ../../
+
+    - name: Build (x86_64)
+      run: |
+        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=true -Duse-libdeflate=true #-Duse-system-fuse=false
+        strip zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
+
+# TODO: write and add tests
+#    - name: Test build
+#      run:
+
+    - name: Upload build
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "continuous"
+        prerelease: true
+        title: "Continuous Build"
+        files: |
+          squashfuse_*
+#          *.AppImage
+#          *.shImg
+#          *.zsync
