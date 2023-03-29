@@ -1,5 +1,6 @@
 const std = @import("std");
 const fuse = @import("fuse.zig");
+const clap = @import("clap");
 const E = fuse.E;
 
 const SquashFs = @import("squashfuse").SquashFs;
@@ -13,17 +14,149 @@ const Squash = struct {
 pub fn main() !void {
     var allocator = std.heap.c_allocator;
 
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help            display this help and exit
+        \\-f, --foreground      run in foreground
+        \\-d, --debug           enable debug output (runs in foreground)
+        \\-o, --option          use a mount option
+        \\
+        \\    --offset <usize>  mount at an offset
+        \\<str>...
+    );
+
+    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{});
+    defer res.deinit();
+
     var args = std.ArrayList([:0]const u8).init(allocator);
     var args_it = std.process.args();
 
     // Skip ARGV0
     try args.append(args_it.next().?);
 
-    // TODO: error handling and offset
-    var sqfs = try SquashFs.init(allocator, args_it.next() orelse "", 0);
+    var sqfs: SquashFs = undefined;
 
-    while (args_it.next()) |arg| {
-        try args.append(arg);
+    var reset: []const u8 = "\x1b[0;0m";
+    var orange: []const u8 = "\x1b[0;33m";
+    var red: []const u8 = "\x1b[0;31m";
+    var light_blue: []const u8 = "\x1b[0;94m";
+    var light_green: []const u8 = "\x1b[0;92m";
+    var cyan: []const u8 = "\x1b[0;36m";
+
+    if (res.args.help or res.positionals.len == 0) {
+        // Obtain the longest argument length
+        var longest_normal: usize = 0;
+        var longest_long_only: usize = 0;
+        for (params) |param| {
+            if (param.names.long) |long_name| {
+                if (param.names.short) |_| {
+                    if (long_name.len > longest_normal) longest_normal = long_name.len;
+                } else {
+                    if (long_name.len > longest_long_only) longest_long_only = long_name.len;
+                }
+            }
+        }
+
+        const env_map = try std.process.getEnvMap(allocator);
+
+        if (env_map.get("NO_COLOR")) |_| {
+            reset = "";
+            orange = "";
+            light_blue = "";
+            light_green = "";
+            cyan = "";
+        }
+
+        std.debug.print(
+            \\{s}usage{s}: {s}{s} {s}[{s}archive{s}] [{s}mountpoint{s}] [{s}option{s}]...
+            \\{s}description{s}: mount SquashFS images
+            \\
+            \\{s}normal options{s}:
+            \\
+        , .{ orange, reset, light_blue, args.items[0], reset, light_blue, reset, light_blue, reset, cyan, reset, orange, reset, orange, reset });
+
+        // Print all normal arguments and their descriptions
+        for (params) |param| {
+            if (param.names.short) |short_name| {
+                std.debug.print("  {s}-{c}{s}, ", .{ cyan, short_name, reset });
+            } else {
+                continue;
+            }
+
+            if (param.names.long) |long_name| {
+                std.debug.print("{s}--{s}{s}:", .{ cyan, long_name, reset });
+
+                // Pad all equal to the longest GNU-style flag
+                for (long_name.len..longest_normal) |_| {
+                    std.debug.print(" ", .{});
+                }
+
+                std.debug.print("  {s}\n", .{param.id.description()});
+            }
+        }
+
+        std.debug.print(
+            \\
+            \\{s}long-only options{s}:
+            \\
+        , .{ orange, reset });
+
+        for (params) |param| {
+            if (param.names.long) |long_name| {
+                if (param.names.short) |_| continue;
+
+                std.debug.print("  {s}--{s}{s}:", .{ cyan, long_name, reset });
+
+                // Pad all equal to the longest GNU-style flag
+                for (long_name.len..longest_long_only) |_| {
+                    std.debug.print(" ", .{});
+                }
+
+                std.debug.print("  {s}\n", .{param.id.description()});
+            }
+        }
+
+        std.debug.print(
+        //            \\
+        //            \\{s}mount options{s}:
+        //            \\  {s}offset{s}: <usize> mount at an offset
+            \\
+            \\{s}enviornment variables{s}:
+            \\  {s}NO_COLOR{s}: disable color
+            \\
+            \\
+            //, .{ orange, reset, cyan, reset, orange, reset, cyan, reset });
+        , .{ orange, reset, cyan, reset });
+
+        return;
+    }
+
+    for (res.positionals, 0..) |arg, idx| {
+        // Open the SquashFS image in the first positional argument
+        if (idx == 0) {
+            const offset = res.args.offset orelse 0;
+
+            sqfs = SquashFs.init(allocator, arg, offset) catch |err| {
+                std.debug.print("{s}::{s} failed to open image: {!}\n", .{ red, reset, err });
+                std.os.exit(1);
+            };
+
+            continue;
+        }
+
+        if (idx > 1) {
+            std.debug.print("{s}::{s} failed to parse args: too many arguments\n", .{ red, reset });
+            std.os.exit(1);
+        }
+
+        // pass further positional args to FUSE
+        const c_arg = try std.cstr.addNullByte(allocator, arg);
+        try args.append(c_arg);
+    }
+
+    if (res.args.debug) {
+        try args.append("-d");
+    } else if (res.args.foreground) {
+        try args.append("-f");
     }
 
     // Append single threading flag
@@ -54,10 +187,9 @@ pub fn main() !void {
 
         // Now add to the HashMap
         try squash.file_tree.put(new_path, entry);
-
-        //std.debug.print("{s}, {d}\n", .{ new_path, new_path.len });
     }
 
+    // TODO: nicer error printing
     try fuse.main(allocator, args.items, &fuse_ops, squash);
 
     return;

@@ -24,8 +24,10 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addIncludePath("zstd/lib");
 
     const squashfuse_mod = b.addModule("squashfuse", .{ .source_file = .{ .path = "lib.zig" } });
+    const clap_mod = b.addModule("clap", .{ .source_file = .{ .path = "zig-clap/clap.zig" } });
 
     exe.addModule("squashfuse", squashfuse_mod);
+    exe.addModule("clap", clap_mod);
 
     var allocator = std.heap.page_allocator;
     var config_args = std.ArrayList([]const u8).init(allocator);

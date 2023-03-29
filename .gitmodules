@@ -13,3 +13,6 @@
 [submodule "libfuse"]
 	path = libfuse
 	url = https://github.com/mgord9518/libfuse
+[submodule "zig-clap"]
+	path = zig-clap
+	url = https://github.com/Hejsil/zig-clap

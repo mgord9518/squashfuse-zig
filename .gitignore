@@ -2,4 +2,5 @@
 *.so
 *.o
 a.out
-zig-*
+zig-out
+zig-cache
