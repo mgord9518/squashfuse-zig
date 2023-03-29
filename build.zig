@@ -41,8 +41,13 @@ pub fn build(b: *std.build.Builder) !void {
             exe.addCSourceFile("libdeflate/lib/deflate_decompress.c", &[_][]const u8{});
             exe.addCSourceFile("libdeflate/lib/utils.c", &[_][]const u8{});
             exe.addCSourceFile("libdeflate/lib/zlib_decompress.c", &[_][]const u8{});
-            exe.addCSourceFile("libdeflate/lib/x86/cpu_features.c", &[_][]const u8{});
-            exe.addCSourceFile("libdeflate/lib/arm/cpu_features.c", &[_][]const u8{});
+
+            const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
+            if (arch.isX86()) {
+                exe.addCSourceFile("libdeflate/lib/x86/cpu_features.c", &[_][]const u8{});
+            } else if (arch.isARM()) {
+                exe.addCSourceFile("libdeflate/lib/arm/cpu_features.c", &[_][]const u8{});
+            }
         } else {
             exe.linkSystemLibrary("zlib");
         }
@@ -87,11 +92,8 @@ pub fn build(b: *std.build.Builder) !void {
         exe.addCSourceFile("zstd/lib/common/xxhash.c", &[_][]const u8{});
 
         // Add x86_64-specific assembly if possible
-        if (exe.target.cpu_arch) |arch| {
-            if (arch == .x86_64) {
-                exe.addCSourceFile("zstd/lib/decompress/huf_decompress_amd64.S", &[_][]const u8{});
-            }
-        } else if (builtin.cpu.arch == .x86_64) {
+        const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
+        if (arch.isX86()) {
             exe.addCSourceFile("zstd/lib/decompress/huf_decompress_amd64.S", &[_][]const u8{});
         }
     }
@@ -117,7 +119,6 @@ pub fn build(b: *std.build.Builder) !void {
         exe.addObjectFile("libfuse/build/lib/libfuse3.a");
     }
 
-    // TODO: automatically include these when importing the bindings
     exe.addCSourceFile("squashfuse/fs.c", &[_][]const u8{});
     exe.addCSourceFile("squashfuse/table.c", &[_][]const u8{});
     exe.addCSourceFile("squashfuse/xattr.c", &[_][]const u8{});
