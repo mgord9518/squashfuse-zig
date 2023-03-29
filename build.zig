@@ -21,6 +21,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe.addIncludePath("libdeflate");
     exe.addIncludePath("squashfuse");
+    exe.addIncludePath("zstd/lib");
 
     const squashfuse_mod = b.addModule("squashfuse", .{ .source_file = .{ .path = "lib.zig" } });
 
