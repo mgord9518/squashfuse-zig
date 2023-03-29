@@ -15,6 +15,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt install libfuse-dev liblzo2-dev meson ninja-build
+        git submodule update --recursive
       
     - name: Build FUSE3
       run: |
