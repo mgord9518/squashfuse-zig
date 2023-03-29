@@ -16,20 +16,48 @@ jobs:
         sudo apt update
         sudo apt install libfuse-dev liblzo2-dev meson ninja-build
         git clone https://github.com/mgord9518/libfuse
-      
+        git clone https://github.com/ebiggers/libdeflate
+        git clone https://github.com/facebook/zstd
+        git clone https://github.com/lz4/lz4
+        git clone https://github.com/xz-mirror/xz
+
+    # TODO: do this in build.zig
     - name: Build FUSE3
       run: |
         cd libfuse
         mkdir build
         cd build
         meson ..
-        meson configure -Ddefault_library=static
+        meson configure -Ddefault_library=static -Dbuildtype=release
         ninja
         cd ../../
 
+    - name: Build XZ
+      run: |
+        cd xz
+        ./autogen.sh
+        ./configure
+        make CFLAGS='-O3'
+
     - name: Build (x86_64)
       run: |
-        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=true -Duse-libdeflate=true #-Duse-system-fuse=false
+        # ZLIB
+        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=true -Duse-libdeflate=true -Denable-zstd=false -Denable-lz4=false -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
+        strip zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
+
+        # ZSTD
+        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=false -Denable-zstd=true -Denable-lz4=false -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
+        strip zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
+
+        # LZ4
+        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=true -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
+        strip zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
+        
+        # XZ
+        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=true -Denable-lzo=false -Duse-system-fuse=false
         strip zig-out/bin/squashfuse
         mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
 
