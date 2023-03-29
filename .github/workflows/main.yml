@@ -22,8 +22,8 @@ jobs:
         cd libfuse
         mkdir build
         cd build
-        meson configure -Ddefault_library=static
         meson ..
+        meson configure -Ddefault_library=static
         ninja
         cd ../../
 
