@@ -42,7 +42,7 @@ pub fn main() !void {
     var light_green: []const u8 = "\x1b[0;92m";
     var cyan: []const u8 = "\x1b[0;36m";
 
-    if (res.args.help or res.positionals.len == 0) {
+    if (res.args.help != 0 or res.positionals.len == 0) {
         // Obtain the longest argument length
         var longest_normal: usize = 0;
         var longest_long_only: usize = 0;
@@ -153,9 +153,9 @@ pub fn main() !void {
         try args.append(c_arg);
     }
 
-    if (res.args.debug) {
+    if (res.args.debug != 0) {
         try args.append("-d");
-    } else if (res.args.foreground) {
+    } else if (res.args.foreground != 0) {
         try args.append("-f");
     }
 
