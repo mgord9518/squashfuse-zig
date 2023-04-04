@@ -27,21 +27,18 @@
 #include "squashfs_fs.h"
 #include <string.h>
 
-#if _WIN32
-	#include "win_decompress.c.inc"
-#endif
-
 #ifdef ENABLE_ZLIB
 #ifdef USE_LIBDEFLATE
 #include <libdeflate.h>
 // TODO: find out why this causes memory corruption
-struct libdeflate_decompressor* decompressor = NULL;
+struct libdeflate_decompressor* ldef_decompressor = NULL;
 
 static sqfs_err sqfs_decompressor_zlib(void *in, size_t insz, void *out, size_t *outsz) {
-	if (!decompressor)
-		decompressor = libdeflate_alloc_decompressor();
+		// Allocate decompressor if we're using libdeflate
+		if (!ldef_decompressor)
+			ldef_decompressor = libdeflate_alloc_decompressor();
 
-	int err = libdeflate_zlib_decompress(decompressor, in, insz, out, *outsz, outsz);
+	int err = libdeflate_zlib_decompress(ldef_decompressor, in, insz, out, *outsz, outsz);
 	if (err != LIBDEFLATE_SUCCESS)
 		return SQFS_ERR;
 
@@ -64,6 +61,7 @@ static sqfs_err sqfs_decompressor_zlib(void *in, size_t insz, void *out, size_t 
 #endif
 
 #ifdef ENABLE_XZ
+#ifdef USE_SYSTEM_XZ
 #include <lzma.h>
 static sqfs_err sqfs_decompressor_xz(void *in, size_t insz, void *out, size_t *outsz) {
 	/* FIXME: Save stream state, to minimize setup time? */
@@ -76,6 +74,17 @@ static sqfs_err sqfs_decompressor_xz(void *in, size_t insz, void *out, size_t *o
 	*outsz = outpos;
 	return SQFS_OK;
 }
+#else
+size_t zig_xz_decode(void*, size_t, void*, size_t*);
+static sqfs_err sqfs_decompressor_xz(void *in, size_t insz, void *out, size_t *outsz) {
+	size_t err = zig_xz_decode(in, insz, out, outsz);
+
+	if (err != 0)
+		return SQFS_ERR;
+
+	return SQFS_OK;
+}
+#endif
 #endif
 
 

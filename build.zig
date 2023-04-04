@@ -17,7 +17,8 @@ pub fn build(b: *std.build.Builder) !void {
     const enable_lzo = b.option(bool, "enable-lzo", "enable lz4 decompression (default: false)") orelse false;
 
     // TODO: add system flags for compression algos
-    const use_system_fuse = b.option(bool, "use-system-fuse", "prefer system FUSE3 library instead of vendored (default: true)") orelse true;
+    const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: true)") orelse true;
+    const use_system_xz = b.option(bool, "use-system-xz", "use system XZ library instead of Zig stdlib (default: false)") orelse false;
 
     exe.addIncludePath("libdeflate");
     exe.addIncludePath("squashfuse");
@@ -29,15 +30,11 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addModule("squashfuse", squashfuse_mod);
     exe.addModule("clap", clap_mod);
 
-    var allocator = std.heap.page_allocator;
-    var config_args = std.ArrayList([]const u8).init(allocator);
-    defer config_args.deinit();
-
     if (enable_zlib) {
-        try config_args.append("-D ENABLE_ZLIB=1");
+        exe.defineCMacro("ENABLE_ZLIB", null);
 
         if (use_libdeflate) {
-            try config_args.append("-D USE_LIBDEFLATE=1");
+            exe.defineCMacro("USE_LIBDEFLATE", null);
 
             exe.addCSourceFile("libdeflate/lib/adler32.c", &[_][]const u8{});
             exe.addCSourceFile("libdeflate/lib/crc32.c", &[_][]const u8{});
@@ -57,32 +54,34 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     if (enable_lz4) {
-        try config_args.append("-D ENABLE_LZ4=1");
+        exe.defineCMacro("ENABLE_LZ4", null);
 
         exe.addCSourceFile("lz4/lib/lz4.c", &[_][]const u8{});
     }
 
     // TODO: vendor LZO
     if (enable_lzo) {
-        try config_args.append("-D ENABLE_LZO=1");
+        exe.defineCMacro("ENABLE_LZO", null);
 
         exe.linkSystemLibrary("lzo2");
     }
 
     if (enable_xz) {
-        try config_args.append("-D ENABLE_XZ=1");
+        exe.defineCMacro("ENABLE_XZ", null);
 
-        //    exe.addCSourceFile("xz/src/liblzma/common/stream_buffer_decoder.c", &[_][]const u8{});
-        //    exe.addCSourceFile("xz/src/liblzma/delta/delta_common.c", &[_][]const u8{});
+        if (use_system_xz) {
+            //    exe.addCSourceFile("xz/src/liblzma/common/stream_buffer_decoder.c", &[_][]const u8{});
+            //    exe.addCSourceFile("xz/src/liblzma/delta/delta_common.c", &[_][]const u8{});
 
-        // TODO: either fix the importing of C files here or automatically build
-        // and import the static libs like so
-        //exe.addObjectFile("xz/src/liblzma/.libs/liblzma.a");
-        exe.linkSystemLibrary("lzma");
+            // TODO: either fix the importing of C files here or automatically build
+            // and import the static libs like so
+            //exe.addObjectFile("xz/src/liblzma/.libs/liblzma.a");
+            exe.linkSystemLibrary("lzma");
+        }
     }
 
     if (enable_zstd) {
-        try config_args.append("-D ENABLE_ZSTD=1");
+        exe.defineCMacro("ENABLE_ZSTD", null);
 
         exe.addCSourceFile("zstd/lib/decompress/zstd_decompress.c", &[_][]const u8{});
         exe.addCSourceFile("zstd/lib/decompress/zstd_decompress_block.c", &[_][]const u8{});
@@ -134,7 +133,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addCSourceFile("squashfuse/stat.c", &[_][]const u8{});
     exe.addCSourceFile("squashfuse/stack.c", &[_][]const u8{});
     exe.addCSourceFile("squashfuse/swap.c", &[_][]const u8{});
-    exe.addCSourceFile("squashfuse/decompress.c", config_args.items);
+    exe.addCSourceFile("squashfuse/decompress.c", &[_][]const u8{});
 
     exe.linkLibC();
     exe.install();

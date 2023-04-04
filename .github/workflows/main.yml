@@ -19,7 +19,7 @@ jobs:
         git clone https://github.com/ebiggers/libdeflate
         git clone https://github.com/facebook/zstd
         git clone https://github.com/lz4/lz4
-        git clone https://github.com/xz-mirror/xz
+        #        git clone https://github.com/xz-mirror/xz
         git clone https://github.com/Hejsil/zig-clap
 
     # TODO: do this in build.zig
@@ -33,12 +33,14 @@ jobs:
         ninja
         cd ../../
 
-    - name: Build XZ
-      run: |
-        cd xz
-        ./autogen.sh
-        ./configure --disable-xz --disable-doc
-        make CFLAGS='-O3'
+        # The performance of Zig's stdlib XZ appear to be on par with the C
+        # implementation and using it is much easier than vendoring
+        #    - name: Build XZ
+        #      run: |
+        #        cd xz
+        #        ./autogen.sh
+        #        ./configure --disable-xz --disable-doc
+        #        make CFLAGS='-O3'
 
     - name: Build (x86_64)
       run: |
