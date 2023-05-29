@@ -1,7 +1,9 @@
 const std = @import("std");
+const fmt = std.fmt;
 const fuse = @import("fuse.zig");
 const clap = @import("clap");
 const E = fuse.E;
+const linux = std.os.linux;
 
 const SquashFs = @import("squashfuse").SquashFs;
 
@@ -11,16 +13,50 @@ const Squash = struct {
     file_tree: std.StringArrayHashMap(SquashFs.Inode.Walker.Entry),
 };
 
+const Version = struct {
+    prefix: ?[]const u8 = null,
+
+    major: u8,
+    minor: u8,
+    patch: u8,
+
+    pub fn string(self: *const Version, buf: []u8) []const u8 {
+        if (self.prefix) |prefix| {
+            return fmt.bufPrint(buf, "{s}-{d}.{d}.{d}", .{
+                prefix,
+                self.major,
+                self.minor,
+                self.patch,
+            }) catch unreachable;
+        }
+
+        return fmt.bufPrint(buf, "{d}.{d}.{d}", .{
+            self.major,
+            self.minor,
+            self.patch,
+        }) catch unreachable;
+    }
+};
+
+const version = Version{
+    .major = 0,
+    .minor = 0,
+    .patch = 36,
+};
+
 pub fn main() !void {
     var allocator = std.heap.c_allocator;
+    var stderr = std.io.getStdErr().writer();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help            display this help and exit
         \\-f, --foreground      run in foreground
         \\-d, --debug           enable debug output (runs in foreground)
-        \\-o, --option          use a mount option
+        // TODO:        \\-x, --extract         extract the entire SquashFS image
+        \\-o, --option <str>... use a mount option
         \\
         \\    --offset <usize>  mount at an offset
+        \\    --version         print the current version
         \\<str>...
     );
 
@@ -66,7 +102,15 @@ pub fn main() !void {
             cyan = "";
         }
 
-        std.debug.print(
+        if (res.args.version != 0) {
+            var buf: [32]u8 = undefined;
+            const ver_str = version.string(&buf);
+
+            try stderr.print("{s}\n", .{ver_str});
+            return;
+        }
+
+        try stderr.print(
             \\{s}usage{s}: {s}{s} {s}[{s}archive{s}] [{s}mountpoint{s}] [{s}option{s}]...
             \\{s}description{s}: mount SquashFS images
             \\
@@ -77,24 +121,24 @@ pub fn main() !void {
         // Print all normal arguments and their descriptions
         for (params) |param| {
             if (param.names.short) |short_name| {
-                std.debug.print("  {s}-{c}{s}, ", .{ cyan, short_name, reset });
+                try stderr.print("  {s}-{c}{s}, ", .{ cyan, short_name, reset });
             } else {
                 continue;
             }
 
             if (param.names.long) |long_name| {
-                std.debug.print("{s}--{s}{s}:", .{ cyan, long_name, reset });
+                try stderr.print("{s}--{s}{s}:", .{ cyan, long_name, reset });
 
                 // Pad all equal to the longest GNU-style flag
                 for (long_name.len..longest_normal) |_| {
-                    std.debug.print(" ", .{});
+                    try stderr.print(" ", .{});
                 }
 
-                std.debug.print("  {s}\n", .{param.id.description()});
+                try stderr.print("  {s}\n", .{param.id.description()});
             }
         }
 
-        std.debug.print(
+        try stderr.print(
             \\
             \\{s}long-only options{s}:
             \\
@@ -104,39 +148,56 @@ pub fn main() !void {
             if (param.names.long) |long_name| {
                 if (param.names.short) |_| continue;
 
-                std.debug.print("  {s}--{s}{s}:", .{ cyan, long_name, reset });
+                try stderr.print("  {s}--{s}{s}:", .{ cyan, long_name, reset });
 
                 // Pad all equal to the longest GNU-style flag
                 for (long_name.len..longest_long_only) |_| {
-                    std.debug.print(" ", .{});
+                    try stderr.print(" ", .{});
                 }
 
-                std.debug.print("  {s}\n", .{param.id.description()});
+                try stderr.print("  {s}\n", .{param.id.description()});
             }
         }
 
-        std.debug.print(
-        //            \\
-        //            \\{s}mount options{s}:
-        //            \\  {s}offset{s}: <usize> mount at an offset
+        try stderr.print(
             \\
             \\{s}enviornment variables{s}:
             \\  {s}NO_COLOR{s}: disable color
             \\
             \\
-            //, .{ orange, reset, cyan, reset, orange, reset, cyan, reset });
         , .{ orange, reset, cyan, reset });
 
         return;
     }
 
+    var offset: usize = 0;
+
+    for (res.args.option) |opt| {
+        // Check if `offset` called as an option as squashfuse supports it
+        if (opt.len >= 7 and std.mem.eql(u8, opt[0..7], "offset=")) {
+            const num_str = opt[7..];
+
+            offset = std.fmt.parseInt(usize, num_str, 0) catch {
+                try stderr.print("{s}::{s} invalid offset given: {s}\n", .{ red, reset, num_str });
+                std.os.exit(1);
+            };
+        } else {
+            // If not, just pass the option on to libfuse
+            const c_opt = try std.cstr.addNullByte(allocator, opt);
+
+            try args.appendSlice(&[_][:0]const u8{ "-o", c_opt });
+        }
+    }
+
     for (res.positionals, 0..) |arg, idx| {
         // Open the SquashFS image in the first positional argument
         if (idx == 0) {
-            const offset = res.args.offset orelse 0;
+            if (res.args.offset) |o| {
+                offset = o;
+            }
 
             sqfs = SquashFs.init(allocator, arg, offset) catch |err| {
-                std.debug.print("{s}::{s} failed to open image: {!}\n", .{ red, reset, err });
+                try stderr.print("{s}::{s} failed to open image: {!}\n", .{ red, reset, err });
                 std.os.exit(1);
             };
 
@@ -144,7 +205,7 @@ pub fn main() !void {
         }
 
         if (idx > 1) {
-            std.debug.print("{s}::{s} failed to parse args: too many arguments\n", .{ red, reset });
+            try stderr.print("{s}::{s} failed to parse args: too many arguments\n", .{ red, reset });
             std.os.exit(1);
         }
 
@@ -209,15 +270,17 @@ export const fuse_ops = fuse.Operations{
     .readlink = squash_readlink,
 };
 
-fn squash_init(nfo: *fuse.ConnectionInfo, conf: *fuse.Config) ?*anyopaque {
+fn squash_init(nfo: *fuse.ConnectionInfo, conf: *fuse.Config) callconv(.C) ?*anyopaque {
     _ = nfo;
     _ = conf;
 
     return fuse.context().private_data;
 }
 
-fn squash_read(p: [*:0]const u8, buf: []u8, o: std.os.linux.off_t, fi: *fuse.FileInfo) c_int {
+fn squash_read(p: [*:0]const u8, b: [*]u8, len: usize, o: std.os.linux.off_t, fi: *fuse.FileInfo) callconv(.C) c_int {
     _ = fi;
+
+    var buf = b[0..len];
 
     const path = std.mem.span(p);
     var squash = fuse.privateDataAs(Squash);
@@ -231,11 +294,11 @@ fn squash_read(p: [*:0]const u8, buf: []u8, o: std.os.linux.off_t, fi: *fuse.Fil
     return @intCast(c_int, read_bytes);
 }
 
-fn squash_create(_: [*:0]const u8, _: std.os.linux.mode_t, _: *fuse.FileInfo) E {
+fn squash_create(_: [*:0]const u8, _: std.os.linux.mode_t, _: *fuse.FileInfo) callconv(.C) E {
     return .read_only;
 }
 
-fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) E {
+fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
     const path = std.mem.span(p);
     var squash = fuse.privateDataAs(Squash);
 
@@ -257,14 +320,14 @@ fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) E {
     return .success;
 }
 
-fn squash_release(_: [*:0]const u8, fi: *fuse.FileInfo) E {
+fn squash_release(_: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
     fi.handle = 0;
     return .success;
 }
 
 const squash_releasedir = squash_release;
 
-fn squash_readdir(p: [*:0]const u8, filler: fuse.FillDir, fi: *fuse.FileInfo, flags: fuse.ReadDirFlags) E {
+fn squash_readdir(p: [*:0]const u8, filler: fuse.FillDir, _: linux.off_t, fi: *fuse.FileInfo, flags: fuse.ReadDirFlags) callconv(.C) E {
     _ = flags;
     _ = fi;
 
@@ -308,14 +371,16 @@ fn squash_readdir(p: [*:0]const u8, filler: fuse.FillDir, fi: *fuse.FileInfo, fl
             // byte after the key slices upon creation
             const path_terminated = @ptrCast([*:0]const u8, key[dirname.len + skip_slash ..].ptr);
 
-            filler.add(path_terminated, &st) catch return .io;
+            try filler.add(path_terminated, &st);
         }
     }
 
     return .success;
 }
 
-fn squash_readlink(p: [*:0]const u8, buf: []u8) E {
+fn squash_readlink(p: [*:0]const u8, b: [*]u8, len: usize) callconv(.C) E {
+    var buf = b[0..len];
+
     const path = std.mem.span(p);
     var squash = fuse.privateDataAs(Squash);
 
@@ -329,7 +394,7 @@ fn squash_readlink(p: [*:0]const u8, buf: []u8) E {
     return .success;
 }
 
-fn squash_open(p: [*:0]const u8, fi: *fuse.FileInfo) E {
+fn squash_open(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
     const path = std.mem.span(p);
     var squash = fuse.privateDataAs(Squash);
 
@@ -343,7 +408,10 @@ fn squash_open(p: [*:0]const u8, fi: *fuse.FileInfo) E {
     return .success;
 }
 
-fn squash_getxattr(p: [*:0]const u8, r: [*:0]const u8, buf: []u8) E {
+// TODO
+fn squash_getxattr(p: [*:0]const u8, r: [*:0]const u8, b: [*]u8, len: usize) callconv(.C) E {
+    var buf = b[0..len];
+
     _ = p;
     _ = r;
     _ = buf;
@@ -351,7 +419,7 @@ fn squash_getxattr(p: [*:0]const u8, r: [*:0]const u8, buf: []u8) E {
     return .success;
 }
 
-fn squash_getattr(p: [*:0]const u8, stbuf: *std.os.linux.Stat, _: *fuse.FileInfo) E {
+fn squash_getattr(p: [*:0]const u8, stbuf: *std.os.linux.Stat, _: *fuse.FileInfo) callconv(.C) E {
     const path = std.mem.span(p);
     var squash = fuse.privateDataAs(Squash);
 
@@ -370,8 +438,4 @@ fn squash_getattr(p: [*:0]const u8, stbuf: *std.os.linux.Stat, _: *fuse.FileInfo
     stbuf.* = inode.statC() catch return .io;
 
     return .success;
-}
-
-fn debug(fmt: []const u8) void {
-    std.debug.print(fmt, .{});
 }
