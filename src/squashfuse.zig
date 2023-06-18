@@ -13,46 +13,25 @@ const Squash = struct {
     file_tree: std.StringArrayHashMap(SquashFs.Inode.Walker.Entry),
 };
 
-const Version = struct {
-    prefix: ?[]const u8 = null,
-
-    major: u8,
-    minor: u8,
-    patch: u8,
-
-    pub fn string(self: *const Version, buf: []u8) []const u8 {
-        if (self.prefix) |prefix| {
-            return fmt.bufPrint(buf, "{s}-{d}.{d}.{d}", .{
-                prefix,
-                self.major,
-                self.minor,
-                self.patch,
-            }) catch unreachable;
-        }
-
-        return fmt.bufPrint(buf, "{d}.{d}.{d}", .{
-            self.major,
-            self.minor,
-            self.patch,
-        }) catch unreachable;
-    }
-};
-
-const version = Version{
+const version = std.SemanticVersion{
     .major = 0,
     .minor = 0,
-    .patch = 36,
+    .patch = 37,
 };
 
 pub fn main() !void {
     var allocator = std.heap.c_allocator;
+
+    // TODO: buffered IO
     var stderr = std.io.getStdErr().writer();
+    var stdout = std.io.getStdOut().writer();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help            display this help and exit
         \\-f, --foreground      run in foreground
         \\-d, --debug           enable debug output (runs in foreground)
         // TODO:        \\-x, --extract         extract the entire SquashFS image
+        \\-l, --list            list file tree of SquashFS image
         \\-o, --option <str>... use a mount option
         \\
         \\    --offset <usize>  mount at an offset
@@ -103,10 +82,12 @@ pub fn main() !void {
         }
 
         if (res.args.version != 0) {
-            var buf: [32]u8 = undefined;
-            const ver_str = version.string(&buf);
+            try stderr.print("{d}.{d}.{d}\n", .{
+                version.major,
+                version.minor,
+                version.patch,
+            });
 
-            try stderr.print("{s}\n", .{ver_str});
             return;
         }
 
@@ -226,9 +207,17 @@ pub fn main() !void {
     var file_tree = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
     var squash = Squash{ .image = sqfs, .file_tree = file_tree };
 
-    var root_inode = try squash.image.getInode(squash.image.internal.sb.root_inode);
+    var root_inode = squash.image.getRootInode();
     var walker = try root_inode.walk(allocator);
     defer walker.deinit();
+
+    if (res.args.list != 0) {
+        while (try walker.next()) |entry| {
+            try stdout.print("{s}\n", .{entry.path});
+        }
+
+        return;
+    }
 
     // Iterate over the SquashFS image
     while (try walker.next()) |entry| {
@@ -303,7 +292,7 @@ fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
     var squash = fuse.privateDataAs(Squash);
 
     if (std.mem.eql(u8, path, "/")) {
-        var inode = squash.image.getInode(squash.image.internal.sb.root_inode) catch return .no_entry;
+        var inode = squash.image.getRootInode();
 
         fi.handle = @ptrToInt(&inode.internal);
 
@@ -334,7 +323,7 @@ fn squash_readdir(p: [*:0]const u8, filler: fuse.FillDir, _: linux.off_t, fi: *f
     var squash = fuse.privateDataAs(Squash);
     var path = std.mem.span(p);
 
-    var root_inode = squash.image.getInode(squash.image.internal.sb.root_inode) catch return .io;
+    var root_inode = squash.image.getRootInode();
     var root_st = root_inode.statC() catch return .io;
 
     // Populate the current and parent directories
@@ -425,7 +414,7 @@ fn squash_getattr(p: [*:0]const u8, stbuf: *std.os.linux.Stat, _: *fuse.FileInfo
 
     // Load from the root inode
     if (std.mem.eql(u8, path, "/")) {
-        var inode = squash.image.getInode(squash.image.internal.sb.root_inode) catch return .no_entry;
+        var inode = squash.image.getRootInode();
         stbuf.* = inode.statC() catch return .io;
 
         return .success;

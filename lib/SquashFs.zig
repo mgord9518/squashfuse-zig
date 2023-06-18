@@ -77,6 +77,12 @@ pub const SquashFs = struct {
         return Inode{ .internal = sqfs_inode, .parent = sqfs, .kind = @intToEnum(File.Kind, sqfs_inode.base.inode_type) };
     }
 
+    pub inline fn getRootInode(sqfs: *SquashFs) Inode {
+        return sqfs.getInode(
+            sqfs.internal.sb.root_inode,
+        ) catch unreachable;
+    }
+
     pub const Inode = struct {
         internal: c.sqfs_inode,
         parent: *SquashFs,
@@ -159,10 +165,18 @@ pub const SquashFs = struct {
                     // This should never fail
                     // if it does, something went very wrong (like messing with
                     // the inode ID)
-                    const err = c.sqfs_inode_get(&self.parent.internal, &sqfs_inode, self.id);
+                    const err = c.sqfs_inode_get(
+                        &self.parent.internal,
+                        &sqfs_inode,
+                        self.id,
+                    );
                     if (err != 0) unreachable;
 
-                    return Inode{ .internal = sqfs_inode, .parent = self.parent, .kind = self.kind };
+                    return Inode{
+                        .internal = sqfs_inode,
+                        .parent = self.parent,
+                        .kind = self.kind,
+                    };
                 }
             };
 
@@ -172,16 +186,27 @@ pub const SquashFs = struct {
                 // Initialize an entry and its name buffer
                 var sqfs_dir_entry: c.sqfs_dir_entry = undefined;
                 var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
                 sqfs_dir_entry.name = &buf;
 
                 var err: c.sqfs_err = undefined;
 
-                const found = c.sqfs_dir_next(&self.parent.internal, &self.internal, &sqfs_dir_entry, &err);
+                const found = c.sqfs_dir_next(
+                    &self.parent.internal,
+                    &self.internal,
+                    &sqfs_dir_entry,
+                    &err,
+                );
                 try SquashFsErrorFromInt(err);
 
                 if (!found) return null;
 
-                return .{ .id = sqfs_dir_entry.inode, .name = sqfs_dir_entry.name[0..sqfs_dir_entry.name_size], .kind = @intToEnum(File.Kind, sqfs_dir_entry.type), .parent = self.parent };
+                return .{
+                    .id = sqfs_dir_entry.inode,
+                    .name = sqfs_dir_entry.name[0..sqfs_dir_entry.name_size],
+                    .kind = @intToEnum(File.Kind, sqfs_dir_entry.type),
+                    .parent = self.parent,
+                };
             }
         };
 
@@ -254,6 +279,7 @@ pub const SquashFs = struct {
 
                         if (entry.kind == .Directory) {
                             var new_dir = entry.inode();
+
                             {
                                 try self.stack.append(StackItem{
                                     .iter = try new_dir.iterate(),
@@ -288,13 +314,16 @@ pub const SquashFs = struct {
 
         /// Extracts an inode from the SquashFS image to `dest` using the buffer
         pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
+            const cwd = fs.cwd();
+
             switch (self.kind) {
                 .File => {
-                    var f = try fs.cwd().createFile(dest, .{});
+                    var f = try cwd.createFile(dest, .{});
                     defer f.close();
 
                     var off: usize = 0;
                     const fsize = @intCast(usize, self.internal.xtra.reg.file_size);
+
                     while (off < fsize) {
                         const read_bytes = try self.read(buf, off);
                         off += read_bytes;
@@ -308,9 +337,8 @@ pub const SquashFs = struct {
                     try f.chmod(st.mode);
                 },
 
-                // TODO: extract recursively
                 .Directory => {
-                    try fs.cwd().makeDir(dest);
+                    try cwd.makeDir(dest);
                 },
 
                 // TODO: implement for other types
@@ -342,12 +370,17 @@ pub const SquashFs = struct {
     };
 };
 
+// Expose a C function to utilize Zig's stdlib XZ implementation
 export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) usize {
     var stream = std.io.fixedBufferStream(in[0..in_size]);
 
     var allocator = std.heap.c_allocator;
 
-    var decompressor = xz.decompress(allocator, stream.reader()) catch return 1;
+    var decompressor = xz.decompress(
+        allocator,
+        stream.reader(),
+    ) catch return 1;
+
     defer decompressor.deinit();
 
     var buf = out[0..out_size.*];
