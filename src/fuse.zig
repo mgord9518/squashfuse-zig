@@ -45,9 +45,9 @@ pub fn main(allocator: std.mem.Allocator, args: []const [:0]const u8, op: *const
         result[idx] = arg.ptr;
     }
 
-    const argc = @intCast(c_int, args.len);
+    const argc: c_int = @intCast(args.len);
     const op_len = @sizeOf(Operations);
-    const data_ptr = @ptrCast(*const anyopaque, &private_data);
+    const data_ptr: *const anyopaque = @ptrCast(&private_data);
 
     const err = fuse_main_real(argc, result.ptr, op, op_len, data_ptr);
     try FuseErrorFromInt(err);
@@ -59,7 +59,7 @@ pub inline fn context() *Context {
 
 // Convenience function to fetch FUSE private data without casting
 pub inline fn privateDataAs(comptime T: type) T {
-    return @ptrCast(*T, @alignCast(@alignOf(T), context().private_data)).*;
+    return @as(*T, @ptrCast(@alignCast(context().private_data))).*;
 }
 
 pub const ReadDirFlags = c.fuse_readdir_flags;
@@ -188,38 +188,38 @@ pub const Operations = extern struct {
 // conventions
 pub const E = enum(c_int) {
     success = 0,
-    no_entry = -@intCast(c_int, @enumToInt(std.os.E.NOENT)),
-    io = -@intCast(c_int, @enumToInt(std.os.E.IO)),
-    bad_fd = -@intCast(c_int, @enumToInt(std.os.E.BADF)),
-    out_of_memory = -@intCast(c_int, @enumToInt(std.os.E.NOMEM)),
-    permission_denied = -@intCast(c_int, @enumToInt(std.os.E.ACCES)),
-    busy = -@intCast(c_int, @enumToInt(std.os.E.BUSY)),
-    file_exists = -@intCast(c_int, @enumToInt(std.os.E.EXIST)),
-    not_dir = -@intCast(c_int, @enumToInt(std.os.E.NOTDIR)),
-    is_dir = -@intCast(c_int, @enumToInt(std.os.E.ISDIR)),
-    invalid_argument = -@intCast(c_int, @enumToInt(std.os.E.INVAL)),
-    ftable_overflow = -@intCast(c_int, @enumToInt(std.os.E.NFILE)),
-    too_many_files = -@intCast(c_int, @enumToInt(std.os.E.MFILE)),
-    exec_busy = -@intCast(c_int, @enumToInt(std.os.E.TXTBSY)),
-    file_too_large = -@intCast(c_int, @enumToInt(std.os.E.FBIG)),
-    read_only = -@intCast(c_int, @enumToInt(std.os.E.ROFS)),
+    no_entry = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOENT))),
+    io = -@as(c_int, @intCast(@intFromEnum(std.os.E.IO))),
+    bad_fd = -@as(c_int, @intCast(@intFromEnum(std.os.E.BADF))),
+    out_of_memory = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOMEM))),
+    permission_denied = -@as(c_int, @intCast(@intFromEnum(std.os.E.ACCES))),
+    busy = -@as(c_int, @intCast(@intFromEnum(std.os.E.BUSY))),
+    file_exists = -@as(c_int, @intCast(@intFromEnum(std.os.E.EXIST))),
+    not_dir = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOTDIR))),
+    is_dir = -@as(c_int, @intCast(@intFromEnum(std.os.E.ISDIR))),
+    invalid_argument = -@as(c_int, @intCast(@intFromEnum(std.os.E.INVAL))),
+    ftable_overflow = -@as(c_int, @intCast(@intFromEnum(std.os.E.NFILE))),
+    too_many_files = -@as(c_int, @intCast(@intFromEnum(std.os.E.MFILE))),
+    exec_busy = -@as(c_int, @intCast(@intFromEnum(std.os.E.TXTBSY))),
+    file_too_large = -@as(c_int, @intCast(@intFromEnum(std.os.E.FBIG))),
+    read_only = -@as(c_int, @intCast(@intFromEnum(std.os.E.ROFS))),
 };
 
 //pub const E = enum(c_int) {
 //    SUCCESS = 0,
-//    NOENT = -@intCast(c_int, @enumToInt(std.os.E.NOENT)),
-//    IO = -@intCast(c_int, @enumToInt(std.os.E.IO)),
-//    BADF = -@intCast(c_int, @enumToInt(std.os.E.BADF)),
-//    NOMEM = -@intCast(c_int, @enumToInt(std.os.E.NOMEM)),
-//    ACCES = -@intCast(c_int, @enumToInt(std.os.E.ACCES)),
-//    BUSY = -@intCast(c_int, @enumToInt(std.os.E.BUSY)),
-//    EXIST = -@intCast(c_int, @enumToInt(std.os.E.EXIST)),
-//    NOTDIR = -@intCast(c_int, @enumToInt(std.os.E.NOTDIR)),
-//    ISDIR = -@intCast(c_int, @enumToInt(std.os.E.ISDIR)),
-//    INVAL = -@intCast(c_int, @enumToInt(std.os.E.INVAL)),
-//    NFILE = -@intCast(c_int, @enumToInt(std.os.E.NFILE)),
-//    MFILE = -@intCast(c_int, @enumToInt(std.os.E.MFILE)),
-//    TXTBSY = -@intCast(c_int, @enumToInt(std.os.E.TXTBSY)),
-//    FBIG = -@intCast(c_int, @enumToInt(std.os.E.FBIG)),
-//    ROFS = -@intCast(c_int, @enumToInt(std.os.E.ROFS)),
+//    NOENT = -@intCast(c_int, @intFromEnum(std.os.E.NOENT)),
+//    IO = -@intCast(c_int, @intFromEnum(std.os.E.IO)),
+//    BADF = -@intCast(c_int, @intFromEnum(std.os.E.BADF)),
+//    NOMEM = -@intCast(c_int, @intFromEnum(std.os.E.NOMEM)),
+//    ACCES = -@intCast(c_int, @intFromEnum(std.os.E.ACCES)),
+//    BUSY = -@intCast(c_int, @intFromEnum(std.os.E.BUSY)),
+//    EXIST = -@intCast(c_int, @intFromEnum(std.os.E.EXIST)),
+//    NOTDIR = -@intCast(c_int, @intFromEnum(std.os.E.NOTDIR)),
+//    ISDIR = -@intCast(c_int, @intFromEnum(std.os.E.ISDIR)),
+//    INVAL = -@intCast(c_int, @intFromEnum(std.os.E.INVAL)),
+//    NFILE = -@intCast(c_int, @intFromEnum(std.os.E.NFILE)),
+//    MFILE = -@intCast(c_int, @intFromEnum(std.os.E.MFILE)),
+//    TXTBSY = -@intCast(c_int, @intFromEnum(std.os.E.TXTBSY)),
+//    FBIG = -@intCast(c_int, @intFromEnum(std.os.E.FBIG)),
+//    ROFS = -@intCast(c_int, @intFromEnum(std.os.E.ROFS)),
 //};

@@ -164,7 +164,7 @@ pub fn main() !void {
             };
         } else {
             // If not, just pass the option on to libfuse
-            const c_opt = try std.cstr.addNullByte(allocator, opt);
+            const c_opt = try allocator.dupeZ(u8, opt);
 
             try args.appendSlice(&[_][:0]const u8{ "-o", c_opt });
         }
@@ -190,8 +190,8 @@ pub fn main() !void {
             std.os.exit(1);
         }
 
-        // pass further positional args to FUSE
-        const c_arg = try std.cstr.addNullByte(allocator, arg);
+        // Pass further positional args to FUSE
+        const c_arg = try allocator.dupeZ(u8, arg);
         try args.append(c_arg);
     }
 
@@ -273,14 +273,14 @@ fn squash_read(p: [*:0]const u8, b: [*]u8, len: usize, o: std.os.linux.off_t, fi
 
     const path = std.mem.span(p);
     var squash = fuse.privateDataAs(Squash);
-    const offset = @intCast(usize, o);
+    const offset: usize = @intCast(o);
 
-    var entry = squash.file_tree.get(path[0..]) orelse return @enumToInt(E.no_entry);
+    var entry = squash.file_tree.get(path[0..]) orelse return @intFromEnum(E.no_entry);
     var inode = entry.inode();
 
-    const read_bytes = inode.read(buf, offset) catch return @enumToInt(E.io);
+    const read_bytes = inode.read(buf, offset) catch return @intFromEnum(E.io);
 
-    return @intCast(c_int, read_bytes);
+    return @intCast(read_bytes);
 }
 
 fn squash_create(_: [*:0]const u8, _: std.os.linux.mode_t, _: *fuse.FileInfo) callconv(.C) E {
@@ -294,7 +294,7 @@ fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
     if (std.mem.eql(u8, path, "/")) {
         var inode = squash.image.getRootInode();
 
-        fi.handle = @ptrToInt(&inode.internal);
+        fi.handle = @intFromPtr(&inode.internal);
 
         return .success;
     }
@@ -304,7 +304,7 @@ fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
 
     if (entry.kind != .Directory) return .not_dir;
 
-    fi.handle = @ptrToInt(&inode.internal);
+    fi.handle = @intFromPtr(&inode.internal);
 
     return .success;
 }
@@ -358,7 +358,7 @@ fn squash_readdir(p: [*:0]const u8, filler: fuse.FillDir, _: linux.off_t, fi: *f
 
             // This cast is normally not safe, but I've explicitly added a null
             // byte after the key slices upon creation
-            const path_terminated = @ptrCast([*:0]const u8, key[dirname.len + skip_slash ..].ptr);
+            const path_terminated: [*:0]const u8 = @ptrCast(key[dirname.len + skip_slash ..].ptr);
 
             try filler.add(path_terminated, &st);
         }
@@ -391,7 +391,7 @@ fn squash_open(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
 
     if (entry.kind == .Directory) return .is_dir;
 
-    fi.handle = @ptrToInt(&entry.inode().internal);
+    fi.handle = @intFromPtr(&entry.inode().internal);
     fi.keep_cache = true;
 
     return .success;
