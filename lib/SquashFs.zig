@@ -74,7 +74,7 @@ pub const SquashFs = struct {
 
         try SquashFsErrorFromInt(c.sqfs_inode_get(&sqfs.internal, &sqfs_inode, id));
 
-        return Inode{ .internal = sqfs_inode, .parent = sqfs, .kind = @intToEnum(File.Kind, sqfs_inode.base.inode_type) };
+        return Inode{ .internal = sqfs_inode, .parent = sqfs, .kind = @enumFromInt(sqfs_inode.base.inode_type) };
     }
 
     pub inline fn getRootInode(sqfs: *SquashFs) Inode {
@@ -83,6 +83,7 @@ pub const SquashFs = struct {
         ) catch unreachable;
     }
 
+    // TODO: implement as seekable stream and remove offset in `read` method
     pub const Inode = struct {
         internal: c.sqfs_inode,
         parent: *SquashFs,
@@ -101,13 +102,13 @@ pub const SquashFs = struct {
         pub fn read(self: *Inode, buf: []u8, off: usize) !usize {
             // squashfuse writes the amount of bytes read back into the `buffer
             // length` variable, so we create that here
-            var buf_len = @intCast(c.sqfs_off_t, buf.len);
+            var buf_len: c.sqfs_off_t = @intCast(buf.len);
 
-            const err = c.sqfs_read_range(&self.parent.internal, &self.internal, @intCast(c.sqfs_off_t, off), &buf_len, @ptrCast(*anyopaque, buf));
+            const err = c.sqfs_read_range(&self.parent.internal, &self.internal, @intCast(off), &buf_len, @ptrCast(buf));
 
             try SquashFsErrorFromInt(err);
 
-            return @intCast(usize, buf_len);
+            return @intCast(buf_len);
         }
 
         pub const Reader = std.io.Reader(Inode, std.os.ReadError, read);
@@ -126,7 +127,7 @@ pub const SquashFs = struct {
         pub fn statC(self: *Inode) !os.Stat {
             var st = std.mem.zeroes(os.Stat);
 
-            const err = c.sqfs_stat(&self.parent.internal, &self.internal, @ptrCast(*c.struct_stat, &st));
+            const err = c.sqfs_stat(&self.parent.internal, &self.internal, @ptrCast(&st));
             try SquashFsErrorFromInt(err);
 
             return st;
@@ -204,7 +205,7 @@ pub const SquashFs = struct {
                 return .{
                     .id = sqfs_dir_entry.inode,
                     .name = sqfs_dir_entry.name[0..sqfs_dir_entry.name_size],
-                    .kind = @intToEnum(File.Kind, sqfs_dir_entry.type),
+                    .kind = @enumFromInt(sqfs_dir_entry.type),
                     .parent = self.parent,
                 };
             }
@@ -322,7 +323,7 @@ pub const SquashFs = struct {
                     defer f.close();
 
                     var off: usize = 0;
-                    const fsize = @intCast(usize, self.internal.xtra.reg.file_size);
+                    const fsize: usize = self.internal.xtra.reg.file_size;
 
                     while (off < fsize) {
                         const read_bytes = try self.read(buf, off);

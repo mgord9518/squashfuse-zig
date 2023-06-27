@@ -202,3 +202,143 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&squashfuse_exe_tests.step);
 }
+
+pub const LinkOptions = struct {
+    enable_zstd: bool,
+    enable_lz4: bool,
+    enable_lzo: bool,
+    enable_zlib: bool,
+    enable_xz: bool,
+
+    use_libdeflate: bool = true,
+    use_system_fuse: bool,
+
+    squashfuse_dir: []const u8,
+};
+
+// TODO: remove leak
+fn append(parent: []const u8, child: []const u8) []const u8 {
+    var allocator = std.heap.page_allocator;
+
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ parent, child }) catch unreachable;
+}
+
+pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
+    const prefix = opts.squashfuse_dir;
+
+    if (opts.enable_zlib) {
+        exe.defineCMacro("ENABLE_ZLIB", null);
+
+        if (opts.use_libdeflate) {
+            exe.addIncludePath(append(prefix, "libdeflate"));
+
+            exe.defineCMacro("USE_LIBDEFLATE", null);
+
+            exe.addCSourceFile(append(prefix, "libdeflate/lib/adler32.c"), &[_][]const u8{});
+            exe.addCSourceFile(append(prefix, "libdeflate/lib/crc32.c"), &[_][]const u8{});
+            exe.addCSourceFile(append(prefix, "libdeflate/lib/deflate_decompress.c"), &[_][]const u8{});
+            exe.addCSourceFile(append(prefix, "libdeflate/lib/utils.c"), &[_][]const u8{});
+            exe.addCSourceFile(append(prefix, "libdeflate/lib/zlib_decompress.c"), &[_][]const u8{});
+
+            const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
+            if (arch.isX86()) {
+                exe.addCSourceFile(append(prefix, "libdeflate/lib/x86/cpu_features.c"), &[_][]const u8{});
+            } else if (arch.isARM()) {
+                exe.addCSourceFile(append(prefix, "libdeflate/lib/arm/cpu_features.c"), &[_][]const u8{});
+            }
+        } else {
+            exe.linkSystemLibrary("zlib");
+        }
+    }
+
+    if (opts.enable_lz4) {
+        exe.addIncludePath(append(prefix, "lz4/lib"));
+        exe.defineCMacro("ENABLE_LZ4", null);
+        exe.addCSourceFile(append(prefix, "lz4/lib/lz4.c"), &[_][]const u8{});
+    }
+
+    // TODO: vendor LZO
+    if (opts.enable_lzo) {
+        exe.defineCMacro("ENABLE_LZO", null);
+
+        exe.linkSystemLibrary("lzo2");
+    }
+
+    //    if (opts.enable_xz) {
+    //        exe.defineCMacro("ENABLE_XZ", null);
+    //
+    //        if (use_system_xz) {
+    //            //    exe.addCSourceFile("xz/src/liblzma/common/stream_buffer_decoder.c", &[_][]const u8{});
+    //            //    exe.addCSourceFile("xz/src/liblzma/delta/delta_common.c", &[_][]const u8{});
+    //
+    //            // TODO: either fix the importing of C files here or automatically build
+    //            // and import the static libs like so
+    //            //exe.addObjectFile("xz/src/liblzma/.libs/liblzma.a");
+    //            exe.linkSystemLibrary("lzma");
+    //        }
+    //    }
+
+    if (opts.enable_zstd) {
+        exe.addIncludePath(append(prefix, "zstd/lib"));
+        exe.defineCMacro("ENABLE_ZSTD", null);
+
+        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/zstd_decompress.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/zstd_decompress_block.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/zstd_ddict.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/huf_decompress.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/common/zstd_common.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/common/error_private.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/common/entropy_common.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/common/fse_decompress.c"), &[_][]const u8{});
+        exe.addCSourceFile(append(prefix, "zstd/lib/common/xxhash.c"), &[_][]const u8{});
+
+        // Add x86_64-specific assembly if possible
+        const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
+        if (arch.isX86()) {
+            exe.addCSourceFile(append(prefix, "zstd/lib/decompress/huf_decompress_amd64.S"), &[_][]const u8{});
+        }
+    }
+
+    exe.addIncludePath(append(prefix, "squashfuse"));
+    exe.addCSourceFile(append(prefix, "squashfuse/fs.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/table.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/xattr.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/cache.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/dir.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/file.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/nonstd-makedev.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/nonstd-pread.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/nonstd-stat.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/stat.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/stack.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/swap.c"), &[_][]const u8{});
+    exe.addCSourceFile(append(prefix, "squashfuse/decompress.c"), &[_][]const u8{});
+
+    if (std.mem.eql(u8, exe.name, "squashfuse")) {
+        // Cannot currently build with FUSE when using musl, so sadly the
+        // main program must be skipped with musl ABI
+
+        if (opts.use_system_fuse) {
+            exe.linkSystemLibrary("fuse3");
+        } else {
+            //    exe.addCSourceFile("libfuse/lib/fuse.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/fuse_loop.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/fuse_loop_mt.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/fuse_lowlevel.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/fuse_opt.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/fuse_signals.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/buffer.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/cuse_lowlevel.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/helper.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/modules/subdir.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/mount_util.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/fuse_log.c", &[_][]const u8{});
+            //    exe.addCSourceFile("libfuse/lib/compat.c", &[_][]const u8{});
+
+            // TODO: automatically build/ vendor
+            exe.addObjectFile("libfuse/build/lib/libfuse3.a");
+        }
+    }
+
+    exe.linkLibC();
+}
