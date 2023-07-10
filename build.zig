@@ -134,25 +134,25 @@ pub fn build(b: *std.build.Builder) !void {
 
     // TODO: Fix tests
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "lib.zig" },
+        .root_source_file = .{ .path = "lib/test.zig" },
         .target = executable_list.items[0].target,
         .optimize = executable_list.items[0].optimize,
     });
 
+    unit_tests.addModule("squashfuse", squashfuse_mod);
+
     linkVendored(unit_tests, .{
-        .enable_lz4 = true,
-        .enable_lzo = true,
-        .enable_zlib = true,
-        .enable_zstd = true,
-        .enable_xz = true,
+        .enable_lz4 = enable_lz4,
+        .enable_lzo = enable_lzo,
+        .enable_zlib = enable_zlib,
+        .enable_zstd = enable_zstd,
+        .enable_xz = enable_xz,
 
         // TODO: test with libdeflate disabled
         .use_libdeflate = true,
 
         .squashfuse_dir = "./",
     });
-
-    unit_tests.addModule("squashfuse", squashfuse_mod);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
