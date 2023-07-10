@@ -16,7 +16,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     // TODO: add system flags for compression algos
     const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: true)") orelse true;
-    const use_system_xz = b.option(bool, "use-system-xz", "use system XZ library instead of Zig stdlib (default: false)") orelse false;
+    //    const use_system_xz = b.option(bool, "use-system-xz", "use system XZ library instead of Zig stdlib (default: false)") orelse false;
     const enable_zlib = b.option(bool, "enable-zlib", "enable zlib decompression (default: true)") orelse true;
     const use_libdeflate = b.option(bool, "use-libdeflate", "replace zlib with libdeflate (faster implementation; default: true)") orelse true;
     const enable_lz4 = b.option(bool, "enable-lz4", "enable lz4 decompression (default: true)") orelse true;
@@ -55,105 +55,42 @@ pub fn build(b: *std.build.Builder) !void {
     });
 
     for (executable_list.items) |exe| {
+        const exe_options = b.addOptions();
+
+        exe_options.addOption(bool, "enable_xz", enable_xz);
+        exe.addOptions("build_options", exe_options);
+
         exe.target = target;
         exe.optimize = optimize;
 
-        exe.addIncludePath("squashfuse");
+        linkVendored(exe, .{
+            .enable_lz4 = enable_lz4,
+            .enable_lzo = enable_lzo,
+            .enable_zlib = enable_zlib,
+            .enable_zstd = enable_zstd,
+            .enable_xz = enable_xz,
+
+            .use_libdeflate = use_libdeflate,
+
+            .squashfuse_dir = "./",
+        });
 
         exe.addModule("squashfuse", squashfuse_mod);
         exe.addModule("clap", clap_mod);
-
-        if (enable_zlib) {
-            exe.defineCMacro("ENABLE_ZLIB", null);
-
-            if (use_libdeflate) {
-                exe.addIncludePath("libdeflate");
-
-                exe.defineCMacro("USE_LIBDEFLATE", null);
-
-                exe.addCSourceFile("libdeflate/lib/adler32.c", &[_][]const u8{});
-                exe.addCSourceFile("libdeflate/lib/crc32.c", &[_][]const u8{});
-                exe.addCSourceFile("libdeflate/lib/deflate_decompress.c", &[_][]const u8{});
-                exe.addCSourceFile("libdeflate/lib/utils.c", &[_][]const u8{});
-                exe.addCSourceFile("libdeflate/lib/zlib_decompress.c", &[_][]const u8{});
-
-                const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
-                if (arch.isX86()) {
-                    exe.addCSourceFile("libdeflate/lib/x86/cpu_features.c", &[_][]const u8{});
-                } else if (arch.isARM()) {
-                    exe.addCSourceFile("libdeflate/lib/arm/cpu_features.c", &[_][]const u8{});
-                }
-            } else {
-                exe.linkSystemLibrary("zlib");
-            }
-        }
-
-        if (enable_lz4) {
-            exe.addIncludePath("lz4/lib");
-            exe.defineCMacro("ENABLE_LZ4", null);
-            exe.addCSourceFile("lz4/lib/lz4.c", &[_][]const u8{});
-        }
-
-        // TODO: vendor LZO
-        if (enable_lzo) {
-            exe.defineCMacro("ENABLE_LZO", null);
-
-            exe.linkSystemLibrary("lzo2");
-        }
-
-        if (enable_xz) {
-            exe.defineCMacro("ENABLE_XZ", null);
-
-            if (use_system_xz) {
-                //    exe.addCSourceFile("xz/src/liblzma/common/stream_buffer_decoder.c", &[_][]const u8{});
-                //    exe.addCSourceFile("xz/src/liblzma/delta/delta_common.c", &[_][]const u8{});
-
-                // TODO: either fix the importing of C files here or automatically build
-                // and import the static libs like so
-                //exe.addObjectFile("xz/src/liblzma/.libs/liblzma.a");
-                exe.linkSystemLibrary("lzma");
-            }
-        }
-
-        if (enable_zstd) {
-            exe.addIncludePath("zstd/lib");
-            exe.defineCMacro("ENABLE_ZSTD", null);
-
-            exe.addCSourceFile("zstd/lib/decompress/zstd_decompress.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/decompress/zstd_decompress_block.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/decompress/zstd_ddict.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/decompress/huf_decompress.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/common/zstd_common.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/common/error_private.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/common/entropy_common.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/common/fse_decompress.c", &[_][]const u8{});
-            exe.addCSourceFile("zstd/lib/common/xxhash.c", &[_][]const u8{});
-
-            // Add x86_64-specific assembly if possible
-            const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
-            if (arch.isX86()) {
-                exe.addCSourceFile("zstd/lib/decompress/huf_decompress_amd64.S", &[_][]const u8{});
-            }
-        }
-
-        exe.addCSourceFile("squashfuse/fs.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/table.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/xattr.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/cache.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/dir.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/file.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/nonstd-makedev.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/nonstd-pread.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/nonstd-stat.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/stat.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/stack.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/swap.c", &[_][]const u8{});
-        exe.addCSourceFile("squashfuse/decompress.c", &[_][]const u8{});
 
         if (std.mem.eql(u8, exe.name, "squashfuse")) {
             // Cannot currently build with FUSE when using musl, so sadly the
             // main program must be skipped with musl ABI
             if (abi == .musl) {
+                std.debug.print("Main squashfuse tool not yet supported for MUSL libc\n", .{});
+                std.debug.print("This is due to Zig not yet supporting C bitfields and\n", .{});
+                std.debug.print("MUSL uses bitfields for the timespec implementation...\n", .{});
+                std.debug.print("which is used by libFUSE.\n\n", .{});
+                std.debug.print("Unfortunately, this means mounting cannot currently be\n", .{});
+                std.debug.print("done with these bindings under MUSL unless I can find another good\n", .{});
+                std.debug.print("FUSE library written in C, C++ or ideally, Zig that somehow doesn't use timespec\n", .{});
+                std.debug.print("Until then, we'll have to deal with no static executables\n\n", .{});
+                std.debug.print("All tools that do not require mounting will still be built\n", .{});
                 continue;
             }
 
@@ -179,7 +116,6 @@ pub fn build(b: *std.build.Builder) !void {
             }
         }
 
-        exe.linkLibC();
         b.installArtifact(exe);
     }
 
@@ -193,14 +129,29 @@ pub fn build(b: *std.build.Builder) !void {
     run_step.dependOn(&run_cmd.step);
 
     // TODO: add tests
-    const squashfuse_exe_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/squashfuse.zig" },
+    const unit_tests = b.addTest(.{
+        .root_source_file = .{ .path = "lib.zig" },
         .target = executable_list.items[0].target,
         .optimize = executable_list.items[0].optimize,
     });
 
+    linkVendored(unit_tests, .{
+        .enable_lz4 = true,
+        .enable_lzo = true,
+        .enable_zlib = true,
+        .enable_zstd = true,
+        .enable_xz = true,
+
+        // TODO: test with libdeflate disabled
+        .use_libdeflate = true,
+
+        .squashfuse_dir = "./",
+    });
+
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&squashfuse_exe_tests.step);
+    test_step.dependOn(&run_unit_tests.step);
 }
 
 pub const LinkOptions = struct {
@@ -211,7 +162,6 @@ pub const LinkOptions = struct {
     enable_xz: bool,
 
     use_libdeflate: bool = true,
-    use_system_fuse: bool,
 
     squashfuse_dir: []const u8,
 };
@@ -264,20 +214,6 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         exe.linkSystemLibrary("lzo2");
     }
 
-    //    if (opts.enable_xz) {
-    //        exe.defineCMacro("ENABLE_XZ", null);
-    //
-    //        if (use_system_xz) {
-    //            //    exe.addCSourceFile("xz/src/liblzma/common/stream_buffer_decoder.c", &[_][]const u8{});
-    //            //    exe.addCSourceFile("xz/src/liblzma/delta/delta_common.c", &[_][]const u8{});
-    //
-    //            // TODO: either fix the importing of C files here or automatically build
-    //            // and import the static libs like so
-    //            //exe.addObjectFile("xz/src/liblzma/.libs/liblzma.a");
-    //            exe.linkSystemLibrary("lzma");
-    //        }
-    //    }
-
     if (opts.enable_zstd) {
         exe.addIncludePath(append(prefix, "zstd/lib"));
         exe.defineCMacro("ENABLE_ZSTD", null);
@@ -295,12 +231,18 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         // Add x86_64-specific assembly if possible
         const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
         if (arch.isX86()) {
-            exe.addCSourceFile(append(prefix, "zstd/lib/decompress/huf_decompress_amd64.S"), &[_][]const u8{});
+            exe.addAssemblyFile(append(prefix, "zstd/lib/decompress/huf_decompress_amd64.S"));
         }
     }
 
+    exe.defineCMacro("ENABLE_XZ", null);
+    //    exe.addSourceFile(append(prefix, "lib/xz.zig"), &[_][]const u8{});
+
+    // Add squashfuse source files
     exe.addIncludePath(append(prefix, "squashfuse"));
-    exe.addCSourceFile(append(prefix, "squashfuse/fs.c"), &[_][]const u8{});
+    exe.addCSourceFiles(&[_][]const u8{
+        append(prefix, "squashfuse/fs.c"),
+    }, &[_][]const u8{});
     exe.addCSourceFile(append(prefix, "squashfuse/table.c"), &[_][]const u8{});
     exe.addCSourceFile(append(prefix, "squashfuse/xattr.c"), &[_][]const u8{});
     exe.addCSourceFile(append(prefix, "squashfuse/cache.c"), &[_][]const u8{});
@@ -313,32 +255,6 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     exe.addCSourceFile(append(prefix, "squashfuse/stack.c"), &[_][]const u8{});
     exe.addCSourceFile(append(prefix, "squashfuse/swap.c"), &[_][]const u8{});
     exe.addCSourceFile(append(prefix, "squashfuse/decompress.c"), &[_][]const u8{});
-
-    if (std.mem.eql(u8, exe.name, "squashfuse")) {
-        // Cannot currently build with FUSE when using musl, so sadly the
-        // main program must be skipped with musl ABI
-
-        if (opts.use_system_fuse) {
-            exe.linkSystemLibrary("fuse3");
-        } else {
-            //    exe.addCSourceFile("libfuse/lib/fuse.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_loop.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_loop_mt.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_lowlevel.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_opt.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_signals.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/buffer.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/cuse_lowlevel.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/helper.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/modules/subdir.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/mount_util.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_log.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/compat.c", &[_][]const u8{});
-
-            // TODO: automatically build/ vendor
-            exe.addObjectFile("libfuse/build/lib/libfuse3.a");
-        }
-    }
 
     exe.linkLibC();
 }

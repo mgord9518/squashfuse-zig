@@ -4,6 +4,7 @@ const span = std.mem.span;
 const expect = std.testing.expect;
 const fs = std.fs;
 const xz = std.compress.xz;
+const build_options = @import("build_options");
 
 const c = @cImport({
     @cInclude("sys/stat.h");
@@ -45,8 +46,12 @@ pub const SquashFs = struct {
         minor: i32,
     };
 
-    pub fn init(allocator: std.mem.Allocator, path: []const u8, offset: u64) !SquashFs {
+    pub fn init(allocator: std.mem.Allocator, path: []const u8, offset: usize) !SquashFs {
+        // Once more C code is ported over, initializing the SquashFS will
+        // require an allocator, so add it to the API now even though it isn't
+        // yet used
         _ = allocator;
+
         var sqfs = SquashFs{
             .internal = undefined,
             .version = undefined,
@@ -88,6 +93,7 @@ pub const SquashFs = struct {
         internal: c.sqfs_inode,
         parent: *SquashFs,
         kind: File.Kind,
+        pos: usize = 0,
 
         /// Reads the link target into `buf`
         pub fn readLink(self: *Inode, buf: []u8) !void {
@@ -98,17 +104,29 @@ pub const SquashFs = struct {
 
         /// Wrapper of `sqfs_read_range`
         /// Use for reading one byte buffer at a time
-        /// Retruns a slice of the read bytes
-        pub fn read(self: *Inode, buf: []u8, off: usize) !usize {
+        /// Retruns the amount of bytes read
+        pub fn read(self: *Inode, buf: []u8) !usize {
             // squashfuse writes the amount of bytes read back into the `buffer
             // length` variable, so we create that here
             var buf_len: c.sqfs_off_t = @intCast(buf.len);
 
-            const err = c.sqfs_read_range(&self.parent.internal, &self.internal, @intCast(off), &buf_len, @ptrCast(buf));
+            const err = c.sqfs_read_range(
+                &self.parent.internal,
+                &self.internal,
+                @intCast(self.pos),
+                &buf_len,
+                @ptrCast(buf),
+            );
 
             try SquashFsErrorFromInt(err);
 
+            self.pos += @intCast(buf_len);
+
             return @intCast(buf_len);
+        }
+
+        pub fn seekTo(self: *Inode, pos: usize) void {
+            self.pos = pos;
         }
 
         pub const Reader = std.io.Reader(Inode, std.os.ReadError, read);
@@ -152,12 +170,14 @@ pub const SquashFs = struct {
             dir: Inode,
             internal: c.sqfs_dir,
             parent: *SquashFs,
+            // SquashFS has max name length of 256. Add another byte for null
+            name_buf: [257]u8 = undefined,
 
             pub const Entry = struct {
                 id: InodeId,
                 parent: *SquashFs,
 
-                name: []const u8,
+                name: [:0]const u8,
                 kind: File.Kind,
 
                 pub inline fn inode(self: *const Entry) Inode {
@@ -184,11 +204,9 @@ pub const SquashFs = struct {
             /// Wraps `sqfs_dir_next`
             /// Returns an entry for the next inode in the directory
             pub fn next(self: *Iterator) !?Entry {
-                // Initialize an entry and its name buffer
                 var sqfs_dir_entry: c.sqfs_dir_entry = undefined;
-                var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
-                sqfs_dir_entry.name = &buf;
+                sqfs_dir_entry.name = &self.name_buf;
 
                 var err: c.sqfs_err = undefined;
 
@@ -198,13 +216,16 @@ pub const SquashFs = struct {
                     &sqfs_dir_entry,
                     &err,
                 );
-                try SquashFsErrorFromInt(err);
 
+                try SquashFsErrorFromInt(err);
                 if (!found) return null;
+
+                // Append null byte
+                self.name_buf[sqfs_dir_entry.name_size] = '\x00';
 
                 return .{
                     .id = sqfs_dir_entry.inode,
-                    .name = sqfs_dir_entry.name[0..sqfs_dir_entry.name_size],
+                    .name = self.name_buf[0..sqfs_dir_entry.name_size :0],
                     .kind = @enumFromInt(sqfs_dir_entry.type),
                     .parent = self.parent,
                 };
@@ -244,7 +265,7 @@ pub const SquashFs = struct {
 
                 dir: Inode,
                 kind: File.Kind,
-                path: []const u8,
+                path: [:0]const u8,
                 basename: []const u8,
 
                 pub inline fn inode(self: *const Entry) Inode {
@@ -252,10 +273,18 @@ pub const SquashFs = struct {
 
                     // This should never fail
                     // if it does, something went very wrong
-                    const err = c.sqfs_inode_get(&self.parent.internal, &sqfs_inode, self.id);
+                    const err = c.sqfs_inode_get(
+                        &self.parent.internal,
+                        &sqfs_inode,
+                        self.id,
+                    );
                     if (err != 0) unreachable;
 
-                    return Inode{ .internal = sqfs_inode, .parent = self.parent, .kind = self.kind };
+                    return Inode{
+                        .internal = sqfs_inode,
+                        .parent = self.parent,
+                        .kind = self.kind,
+                    };
                 }
             };
 
@@ -278,7 +307,7 @@ pub const SquashFs = struct {
 
                         try self.name_buffer.appendSlice(entry.name);
 
-                        if (entry.kind == .Directory) {
+                        if (entry.kind == .directory) {
                             var new_dir = entry.inode();
 
                             {
@@ -291,12 +320,16 @@ pub const SquashFs = struct {
                             }
                         }
 
+                        // Append null byte
+                        try self.name_buffer.append('\x00');
+                        const path = self.name_buffer.items[0 .. self.name_buffer.items.len - 1 :0];
+
                         return .{
                             .dir = containing.iter.dir,
                             .basename = self.name_buffer.items[dirname_len..],
                             .id = entry.id,
                             .parent = entry.parent,
-                            .path = self.name_buffer.items,
+                            .path = path,
                             .kind = entry.kind,
                         };
                     }
@@ -318,7 +351,7 @@ pub const SquashFs = struct {
             const cwd = fs.cwd();
 
             switch (self.kind) {
-                .File => {
+                .file => {
                     var f = try cwd.createFile(dest, .{});
                     defer f.close();
 
@@ -326,7 +359,8 @@ pub const SquashFs = struct {
                     const fsize: usize = self.internal.xtra.reg.file_size;
 
                     while (off < fsize) {
-                        const read_bytes = try self.read(buf, off);
+                        //                        const read_bytes = try self.read(buf, off);
+                        const read_bytes = try self.read(buf);
                         off += read_bytes;
 
                         _ = try f.write(buf[0..read_bytes]);
@@ -338,7 +372,7 @@ pub const SquashFs = struct {
                     try f.chmod(st.mode);
                 },
 
-                .Directory => {
+                .directory => {
                     try cwd.makeDir(dest);
                 },
 
@@ -350,43 +384,48 @@ pub const SquashFs = struct {
 
     pub const File = struct {
         pub const Kind = enum(u8) {
-            Directory = 1,
-            File,
-            SymLink,
-            BlockDevice,
-            CharacterDevice,
-            NamedPipe,
-            UnixDomainSocket,
+            directory = 1,
+            file,
+            sym_link,
+            block_device,
+            character_device,
+            named_pipe,
+            unix_domain_socket,
 
             // Not really sure what these are tbh, but squashfuse has entries for
             // them
-            LDirectory,
-            LFile,
-            LSymLink,
-            LBlockDevice,
-            LCharacterDevice,
-            LNamedPipe,
-            LUnixDomainSocket,
+            l_directory,
+            l_file,
+            l_sym_link,
+            l_block_device,
+            l_character_device,
+            l_named_pipe,
+            l_unix_domain_socket,
         };
     };
 };
 
-// Expose a C function to utilize Zig's stdlib XZ implementation
-export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) usize {
-    var stream = std.io.fixedBufferStream(in[0..in_size]);
+usingnamespace if (build_options.enable_xz)
+{
+    // Expose a C function to utilize Zig's stdlib XZ implementation
+    struct {
+        export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) usize {
+            var stream = std.io.fixedBufferStream(in[0..in_size]);
 
-    var allocator = std.heap.c_allocator;
+            var allocator = std.heap.c_allocator;
 
-    var decompressor = xz.decompress(
-        allocator,
-        stream.reader(),
-    ) catch return 1;
+            var decompressor = xz.decompress(
+                allocator,
+                stream.reader(),
+            ) catch return 1;
 
-    defer decompressor.deinit();
+            defer decompressor.deinit();
 
-    var buf = out[0..out_size.*];
+            var buf = out[0..out_size.*];
 
-    out_size.* = decompressor.read(buf) catch return 2;
+            out_size.* = decompressor.read(buf) catch return 2;
 
-    return 0;
-}
+            return 0;
+        }
+    };
+};

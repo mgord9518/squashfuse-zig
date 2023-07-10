@@ -1,0 +1,11 @@
+.{
+	.name = "squashfuse-zig",
+	.version = "0.0.1",
+
+	// TODO: add deps
+//	.dependancies = .{
+//		.zstd = .{
+//			.url = https://github.com/facebook/zstd,
+//		},
+//	}
+}

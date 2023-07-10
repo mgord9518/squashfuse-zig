@@ -277,8 +277,9 @@ fn squash_read(p: [*:0]const u8, b: [*]u8, len: usize, o: std.os.linux.off_t, fi
 
     var entry = squash.file_tree.get(path[0..]) orelse return @intFromEnum(E.no_entry);
     var inode = entry.inode();
+    inode.seekTo(offset);
 
-    const read_bytes = inode.read(buf, offset) catch return @intFromEnum(E.io);
+    const read_bytes = inode.read(buf) catch return @intFromEnum(E.io);
 
     return @intCast(read_bytes);
 }
@@ -302,7 +303,7 @@ fn squash_opendir(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
     var entry = squash.file_tree.get(path[0..]) orelse return .no_entry;
     var inode = entry.inode();
 
-    if (entry.kind != .Directory) return .not_dir;
+    if (entry.kind != .directory) return .not_dir;
 
     fi.handle = @intFromPtr(&inode.internal);
 
@@ -376,7 +377,7 @@ fn squash_readlink(p: [*:0]const u8, b: [*]u8, len: usize) callconv(.C) E {
     var entry = squash.file_tree.get(path) orelse return .no_entry;
     var inode = entry.inode();
 
-    if (entry.kind != .SymLink) return .invalid_argument;
+    if (entry.kind != .sym_link) return .invalid_argument;
 
     inode.readLink(buf) catch return .io;
 
@@ -389,7 +390,7 @@ fn squash_open(p: [*:0]const u8, fi: *fuse.FileInfo) callconv(.C) E {
 
     const entry = squash.file_tree.get(path) orelse return .no_entry;
 
-    if (entry.kind == .Directory) return .is_dir;
+    if (entry.kind == .directory) return .is_dir;
 
     fi.handle = @intFromPtr(&entry.inode().internal);
     fi.keep_cache = true;
