@@ -12,7 +12,7 @@ fn initExecutable(b: *std.build.Builder, name: []const u8) !*std.Build.Step.Comp
 }
 
 pub fn build(b: *std.build.Builder) !void {
-    const allocator = std.heap.page_allocator;
+    const allocator = b.allocator;
 
     // TODO: add system flags for compression algos
     const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: true)") orelse true;
@@ -44,9 +44,18 @@ pub fn build(b: *std.build.Builder) !void {
 
     const abi = executable_list.items[0].target.getAbi();
 
+    const exe_options = b.addOptions();
+    exe_options.addOption(bool, "enable_xz", enable_xz);
+
     const squashfuse_mod = b.addModule("squashfuse", .{
         .source_file = .{
             .path = "lib.zig",
+        },
+        .dependencies = &.{
+            .{
+                .name = "build_options",
+                .module = exe_options.createModule(),
+            },
         },
     });
 
@@ -55,11 +64,6 @@ pub fn build(b: *std.build.Builder) !void {
     });
 
     for (executable_list.items) |exe| {
-        const exe_options = b.addOptions();
-
-        exe_options.addOption(bool, "enable_xz", enable_xz);
-        exe.addOptions("build_options", exe_options);
-
         exe.target = target;
         exe.optimize = optimize;
 
@@ -128,7 +132,7 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // TODO: add tests
+    // TODO: Fix tests
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "lib.zig" },
         .target = executable_list.items[0].target,
@@ -147,6 +151,8 @@ pub fn build(b: *std.build.Builder) !void {
 
         .squashfuse_dir = "./",
     });
+
+    unit_tests.addModule("squashfuse", squashfuse_mod);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
@@ -184,11 +190,13 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
 
             exe.defineCMacro("USE_LIBDEFLATE", null);
 
-            exe.addCSourceFile(append(prefix, "libdeflate/lib/adler32.c"), &[_][]const u8{});
-            exe.addCSourceFile(append(prefix, "libdeflate/lib/crc32.c"), &[_][]const u8{});
-            exe.addCSourceFile(append(prefix, "libdeflate/lib/deflate_decompress.c"), &[_][]const u8{});
-            exe.addCSourceFile(append(prefix, "libdeflate/lib/utils.c"), &[_][]const u8{});
-            exe.addCSourceFile(append(prefix, "libdeflate/lib/zlib_decompress.c"), &[_][]const u8{});
+            exe.addCSourceFiles(&[_][]const u8{
+                append(prefix, "libdeflate/lib/adler32.c"),
+                append(prefix, "libdeflate/lib/crc32.c"),
+                append(prefix, "libdeflate/lib/deflate_decompress.c"),
+                append(prefix, "libdeflate/lib/utils.c"),
+                append(prefix, "libdeflate/lib/zlib_decompress.c"),
+            }, &[_][]const u8{});
 
             const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
             if (arch.isX86()) {
@@ -218,15 +226,17 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         exe.addIncludePath(append(prefix, "zstd/lib"));
         exe.defineCMacro("ENABLE_ZSTD", null);
 
-        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/zstd_decompress.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/zstd_decompress_block.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/zstd_ddict.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/decompress/huf_decompress.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/common/zstd_common.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/common/error_private.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/common/entropy_common.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/common/fse_decompress.c"), &[_][]const u8{});
-        exe.addCSourceFile(append(prefix, "zstd/lib/common/xxhash.c"), &[_][]const u8{});
+        exe.addCSourceFiles(&[_][]const u8{
+            append(prefix, "zstd/lib/decompress/zstd_decompress.c"),
+            append(prefix, "zstd/lib/decompress/zstd_decompress_block.c"),
+            append(prefix, "zstd/lib/decompress/zstd_ddict.c"),
+            append(prefix, "zstd/lib/decompress/huf_decompress.c"),
+            append(prefix, "zstd/lib/common/zstd_common.c"),
+            append(prefix, "zstd/lib/common/error_private.c"),
+            append(prefix, "zstd/lib/common/entropy_common.c"),
+            append(prefix, "zstd/lib/common/fse_decompress.c"),
+            append(prefix, "zstd/lib/common/xxhash.c"),
+        }, &[_][]const u8{});
 
         // Add x86_64-specific assembly if possible
         const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
@@ -235,26 +245,27 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         }
     }
 
-    exe.defineCMacro("ENABLE_XZ", null);
-    //    exe.addSourceFile(append(prefix, "lib/xz.zig"), &[_][]const u8{});
+    if (opts.enable_xz) {
+        exe.defineCMacro("ENABLE_XZ", null);
+    }
 
     // Add squashfuse source files
     exe.addIncludePath(append(prefix, "squashfuse"));
     exe.addCSourceFiles(&[_][]const u8{
         append(prefix, "squashfuse/fs.c"),
+        append(prefix, "squashfuse/table.c"),
+        append(prefix, "squashfuse/xattr.c"),
+        append(prefix, "squashfuse/cache.c"),
+        append(prefix, "squashfuse/dir.c"),
+        append(prefix, "squashfuse/file.c"),
+        append(prefix, "squashfuse/nonstd-makedev.c"),
+        append(prefix, "squashfuse/nonstd-pread.c"),
+        append(prefix, "squashfuse/nonstd-stat.c"),
+        append(prefix, "squashfuse/stat.c"),
+        append(prefix, "squashfuse/stack.c"),
+        append(prefix, "squashfuse/swap.c"),
+        append(prefix, "squashfuse/decompress.c"),
     }, &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/table.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/xattr.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/cache.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/dir.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/file.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/nonstd-makedev.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/nonstd-pread.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/nonstd-stat.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/stat.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/stack.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/swap.c"), &[_][]const u8{});
-    exe.addCSourceFile(append(prefix, "squashfuse/decompress.c"), &[_][]const u8{});
 
     exe.linkLibC();
 }

@@ -405,9 +405,9 @@ pub const SquashFs = struct {
     };
 };
 
+// Define C symbols for compression algos
+// TODO: add more Zig-implemented algos if they're performant
 usingnamespace if (build_options.enable_xz)
-{
-    // Expose a C function to utilize Zig's stdlib XZ implementation
     struct {
         export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) usize {
             var stream = std.io.fixedBufferStream(in[0..in_size]);
@@ -427,5 +427,6 @@ usingnamespace if (build_options.enable_xz)
 
             return 0;
         }
-    };
-};
+    }
+else
+    struct {};
