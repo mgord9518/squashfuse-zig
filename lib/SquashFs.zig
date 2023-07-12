@@ -1,9 +1,11 @@
 const std = @import("std");
+const io = std.io;
 const os = std.os;
 const span = std.mem.span;
 const expect = std.testing.expect;
 const fs = std.fs;
 const xz = std.compress.xz;
+const zstd = std.compress.zstd;
 const build_options = @import("build_options");
 
 const c = @cImport({
@@ -38,15 +40,23 @@ pub const InodeId = c.sqfs_inode_id;
 
 pub const SquashFs = struct {
     internal: c.sqfs,
-    version: Version,
+    version: std.SemanticVersion,
     file: fs.File,
 
-    pub const Version = struct {
-        major: i32,
-        minor: i32,
+    pub const Compression = enum(c_int) {
+        zlib = 1,
+        lzma = 2,
+        lzo = 3,
+        xz = 4,
+        lz4 = 5,
+        zstd = 6,
     };
 
-    pub fn init(allocator: std.mem.Allocator, path: []const u8, offset: usize) !SquashFs {
+    pub const Options = struct {
+        offset: usize = 0,
+    };
+
+    pub fn init(allocator: std.mem.Allocator, path: []const u8, opts: Options) !SquashFs {
         // Once more C code is ported over, initializing the SquashFS will
         // require an allocator, so add it to the API now even though it isn't
         // yet used
@@ -54,15 +64,27 @@ pub const SquashFs = struct {
 
         var sqfs = SquashFs{
             .internal = undefined,
-            .version = undefined,
+            .version = .{
+                .major = undefined,
+                .minor = undefined,
+                .patch = 0,
+            },
             .file = try std.fs.cwd().openFile(path, .{}),
         };
 
         // Populate internal squashfuse struct
-        try SquashFsErrorFromInt(c.sqfs_init(&sqfs.internal, sqfs.file.handle, offset));
+        try SquashFsErrorFromInt(c.sqfs_init(
+            &sqfs.internal,
+            sqfs.file.handle,
+            opts.offset,
+        ));
 
         // Set version
-        c.sqfs_version(&sqfs.internal, &sqfs.version.major, &sqfs.version.minor);
+        c.sqfs_version(
+            &sqfs.internal,
+            @ptrCast(&sqfs.version.major),
+            @ptrCast(&sqfs.version.minor),
+        );
 
         return sqfs;
     }
@@ -88,12 +110,11 @@ pub const SquashFs = struct {
         ) catch unreachable;
     }
 
-    // TODO: implement as seekable stream and remove offset in `read` method
     pub const Inode = struct {
         internal: c.sqfs_inode,
         parent: *SquashFs,
         kind: File.Kind,
-        pos: usize = 0,
+        pos: u64 = 0,
 
         /// Reads the link target into `buf`
         pub fn readLink(self: *Inode, buf: []u8) !void {
@@ -125,8 +146,47 @@ pub const SquashFs = struct {
             return @intCast(buf_len);
         }
 
-        pub fn seekTo(self: *Inode, pos: usize) void {
+        pub const SeekableStream = io.SeekableStream(
+            Inode,
+            SeekError,
+            GetSeekPosError,
+            seekTo,
+            seekBy,
+            getPos,
+            getEndPos,
+        );
+
+        pub const setEndPos = @compileError("setEndPos not possible for SquashFS (read-only filesystem)");
+
+        pub const GetSeekPosError = os.SeekError || os.FStatError;
+        pub const SeekError = os.SeekError || error{InvalidSeek};
+
+        // TODO: handle invalid seeks
+        pub fn seekTo(self: *Inode, pos: u64) SeekError!void {
+            const end = self.getEndPos() catch return SeekError.Unseekable;
+
+            if (pos > end) {
+                return SeekError.InvalidSeek;
+            }
+
             self.pos = pos;
+        }
+
+        pub fn seekBy(self: *Inode, pos: i64) SeekError!void {
+            self.pos += pos;
+        }
+
+        pub fn seekFromEnd(self: *Inode, pos: i64) SeekError!void {
+            const end = self.getEndPos() catch return SeekError.Unseekable;
+            self.pos = end + pos;
+        }
+
+        pub fn getPos(self: *const Inode) GetSeekPosError!u64 {
+            return self.pos;
+        }
+
+        pub fn getEndPos(self: *const Inode) GetSeekPosError!u64 {
+            return @intCast(self.internal.xtra.reg.file_size);
         }
 
         pub const Reader = std.io.Reader(Inode, std.os.ReadError, read);
@@ -405,11 +465,43 @@ pub const SquashFs = struct {
     };
 };
 
+// I'm sure there's a better way to do this...
+// Zig won't compile them in if they aren't used, but this still feels like acrime
+// crime.
+extern fn zig_zlib_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
+extern fn zig_xz_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
+extern fn zig_zstd_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
+extern fn zig_lz4_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
+extern fn zig_lzo_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
+
+export fn sqfs_decompressor_get(kind: SquashFs.Compression) ?*const fn ([*]u8, usize, [*]u8, *usize) callconv(.C) c.sqfs_err {
+    switch (kind) {
+        .zlib => {
+            if (comptime build_options.enable_zlib) return zig_zlib_decode;
+        },
+        .lzma => return null,
+        .xz => {
+            if (comptime build_options.enable_xz) return zig_xz_decode;
+        },
+        .lzo => {
+            if (comptime build_options.enable_lzo) return zig_lzo_decode;
+        },
+        .lz4 => {
+            if (comptime build_options.enable_lz4) return zig_lz4_decode;
+        },
+        .zstd => {
+            if (comptime build_options.enable_zstd) return zig_zstd_decode;
+        },
+    }
+
+    return null;
+}
+
 // Define C symbols for compression algos
 // TODO: add more Zig-implemented algos if they're performant
 usingnamespace if (build_options.enable_xz)
     struct {
-        export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) usize {
+        export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
             var stream = std.io.fixedBufferStream(in[0..in_size]);
 
             var allocator = std.heap.c_allocator;
@@ -428,5 +520,109 @@ usingnamespace if (build_options.enable_xz)
             return 0;
         }
     }
+else
+    struct {};
+
+usingnamespace if (build_options.enable_zlib)
+    struct {
+        const ldef = @cImport({
+            @cInclude("libdeflate.h");
+        });
+
+        var ldef_decompressor: ?*ldef.libdeflate_decompressor = null;
+
+        export fn zig_zlib_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+            if (ldef_decompressor == null) {
+                ldef_decompressor = ldef.libdeflate_alloc_decompressor();
+            }
+
+            const err = ldef.libdeflate_zlib_decompress(
+                ldef_decompressor,
+                in,
+                in_size,
+                out,
+                out_size.*,
+                out_size,
+            );
+
+            if (err != ldef.LIBDEFLATE_SUCCESS) {
+                return c.SQFS_ERR;
+            }
+
+            return c.SQFS_OK;
+        }
+    }
+else
+    struct {};
+
+usingnamespace if (build_options.enable_lz4)
+    struct {
+        const lz = @cImport({
+            @cInclude("lz4.h");
+        });
+        export fn zig_lz4_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+            const err = lz.LZ4_decompress_safe(
+                in,
+                out,
+                @intCast(in_size),
+                @intCast(out_size.*),
+            );
+
+            if (err < 0) {
+                return c.SQFS_ERR;
+            }
+
+            out_size.* = @intCast(err);
+
+            return c.SQFS_OK;
+        }
+    }
+else
+    struct {};
+
+usingnamespace if (build_options.enable_zstd)
+    if (build_options.use_zig_zstd)
+        struct {
+            export fn zig_zstd_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+                var stream = std.io.fixedBufferStream(in[0..in_size]);
+
+                var allocator = std.heap.c_allocator;
+
+                var decompressor = zstd.decompressStream(
+                    allocator,
+                    stream.reader(),
+                );
+
+                defer decompressor.deinit();
+
+                var buf = out[0..out_size.*];
+
+                out_size.* = decompressor.read(buf) catch return c.SQFS_ERR;
+
+                return c.SQFS_OK;
+            }
+        }
+    else
+        struct {
+            const czstd = @cImport({
+                @cInclude("zstd.h");
+            });
+            export fn zig_zstd_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+                const err = czstd.ZSTD_decompress(
+                    out,
+                    out_size.*,
+                    in,
+                    in_size,
+                );
+
+                if (czstd.ZSTD_isError(err) != 0) {
+                    return c.SQFS_ERR;
+                }
+
+                out_size.* = err;
+
+                return c.SQFS_OK;
+            }
+        }
 else
     struct {};

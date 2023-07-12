@@ -166,7 +166,9 @@ pub fn main() !void {
             offset = o;
         }
 
-        sqfs = SquashFs.init(allocator, arg, offset) catch |err| {
+        sqfs = SquashFs.init(allocator, arg, .{
+            .offset = offset,
+        }) catch |err| {
             try stderr.print("{s}::{s} failed to open image: {!}\n", .{ red, reset, err });
             std.os.exit(1);
         };

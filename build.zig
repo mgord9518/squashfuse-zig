@@ -16,11 +16,11 @@ pub fn build(b: *std.build.Builder) !void {
 
     // TODO: add system flags for compression algos
     const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: true)") orelse true;
-    //    const use_system_xz = b.option(bool, "use-system-xz", "use system XZ library instead of Zig stdlib (default: false)") orelse false;
     const enable_zlib = b.option(bool, "enable-zlib", "enable zlib decompression (default: true)") orelse true;
     const use_libdeflate = b.option(bool, "use-libdeflate", "replace zlib with libdeflate (faster implementation; default: true)") orelse true;
     const enable_lz4 = b.option(bool, "enable-lz4", "enable lz4 decompression (default: true)") orelse true;
     const enable_zstd = b.option(bool, "enable-zstd", "enable zstd decompression (default: true)") orelse true;
+    const use_zig_zstd = b.option(bool, "use-zig-zstd", "use Zig stdlib zstd implementation (default: false)") orelse false;
     const enable_xz = b.option(bool, "enable-xz", "enable xz decompression (default: false)") orelse false;
     const enable_lzo = b.option(bool, "enable-lzo", "enable lz4 decompression (default: false)") orelse false;
 
@@ -46,6 +46,12 @@ pub fn build(b: *std.build.Builder) !void {
 
     const exe_options = b.addOptions();
     exe_options.addOption(bool, "enable_xz", enable_xz);
+    exe_options.addOption(bool, "enable_zlib", enable_zlib);
+    exe_options.addOption(bool, "use_libdeflate", use_libdeflate);
+    exe_options.addOption(bool, "enable_lzo", enable_lzo);
+    exe_options.addOption(bool, "enable_lz4", enable_lz4);
+    exe_options.addOption(bool, "enable_zstd", enable_zstd);
+    exe_options.addOption(bool, "use_zig_zstd", use_zig_zstd);
 
     const squashfuse_mod = b.addModule("squashfuse", .{
         .source_file = .{
@@ -139,20 +145,42 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = executable_list.items[0].optimize,
     });
 
-    unit_tests.addModule("squashfuse", squashfuse_mod);
-
     linkVendored(unit_tests, .{
-        .enable_lz4 = enable_lz4,
-        .enable_lzo = enable_lzo,
-        .enable_zlib = enable_zlib,
-        .enable_zstd = enable_zstd,
-        .enable_xz = enable_xz,
+        .enable_lz4 = true,
+        // TODO: add LZO
+        .enable_lzo = false,
+        .enable_zlib = true,
+        .enable_zstd = true,
+        .enable_xz = true,
 
         // TODO: test with libdeflate disabled
         .use_libdeflate = true,
 
         .squashfuse_dir = "./",
     });
+
+    const test_options = b.addOptions();
+    test_options.addOption(bool, "enable_xz", true);
+    test_options.addOption(bool, "enable_zlib", true);
+    test_options.addOption(bool, "use_libdeflate", true);
+    test_options.addOption(bool, "enable_lzo", false);
+    test_options.addOption(bool, "enable_lz4", true);
+    test_options.addOption(bool, "enable_zstd", true);
+    test_options.addOption(bool, "use_zig_zstd", true);
+
+    const squashfuse_test_mod = b.addModule("squashfuse", .{
+        .source_file = .{
+            .path = "lib.zig",
+        },
+        .dependencies = &.{
+            .{
+                .name = "build_options",
+                .module = test_options.createModule(),
+            },
+        },
+    });
+
+    unit_tests.addModule("squashfuse", squashfuse_test_mod);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
@@ -264,7 +292,6 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         append(prefix, "squashfuse/stat.c"),
         append(prefix, "squashfuse/stack.c"),
         append(prefix, "squashfuse/swap.c"),
-        append(prefix, "squashfuse/decompress.c"),
     }, &[_][]const u8{});
 
     exe.linkLibC();

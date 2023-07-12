@@ -177,7 +177,9 @@ pub fn main() !void {
                 offset = o;
             }
 
-            sqfs = SquashFs.init(allocator, arg, offset) catch |err| {
+            sqfs = SquashFs.init(allocator, arg, .{
+                .offset = offset,
+            }) catch |err| {
                 try stderr.print("{s}::{s} failed to open image: {!}\n", .{ red, reset, err });
                 std.os.exit(1);
             };
@@ -277,7 +279,7 @@ fn squash_read(p: [*:0]const u8, b: [*]u8, len: usize, o: std.os.linux.off_t, fi
 
     var entry = squash.file_tree.get(path[0..]) orelse return @intFromEnum(E.no_entry);
     var inode = entry.inode();
-    inode.seekTo(offset);
+    inode.seekTo(offset) catch return @intFromEnum(E.io);
 
     const read_bytes = inode.read(buf) catch return @intFromEnum(E.io);
 
