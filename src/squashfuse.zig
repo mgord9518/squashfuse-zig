@@ -221,21 +221,11 @@ pub fn main() !void {
         return;
     }
 
-    // Iterate over the SquashFS image
+    // Populate the file_tree
     while (try walker.next()) |entry| {
-        // Copy paths as they're automatically cleaned up and we actually want
-        // them to stick around
-        var buf = try allocator.alloc(u8, entry.path.len + 2);
-
         // Start new path with slash as squashfuse doesn't supply one
-        std.mem.copy(u8, buf[1..], entry.path);
-        buf[0] = '/';
-
-        // Make sure to add a null byte, because the keys will be not-so-optimally
-        // casted to [*:0]const u8 for use in FUSE
-        buf[buf.len - 1] = '\x00';
-
-        const new_path = buf[0 .. buf.len - 1 :0];
+        // and add a null byte
+        const new_path = try std.fmt.allocPrintZ(allocator, "/{s}", .{entry.path});
 
         // Now add to the HashMap
         try squash.file_tree.put(new_path, entry);

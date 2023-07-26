@@ -211,12 +211,8 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     const prefix = opts.squashfuse_dir;
 
     if (opts.enable_zlib) {
-        exe.defineCMacro("ENABLE_ZLIB", null);
-
         if (opts.use_libdeflate) {
             exe.addIncludePath(append(prefix, "libdeflate"));
-
-            exe.defineCMacro("USE_LIBDEFLATE", null);
 
             exe.addCSourceFiles(&[_][]const u8{
                 append(prefix, "libdeflate/lib/adler32.c"),
@@ -239,20 +235,16 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
 
     if (opts.enable_lz4) {
         exe.addIncludePath(append(prefix, "lz4/lib"));
-        exe.defineCMacro("ENABLE_LZ4", null);
         exe.addCSourceFile(append(prefix, "lz4/lib/lz4.c"), &[_][]const u8{});
     }
 
     // TODO: vendor LZO
     if (opts.enable_lzo) {
-        exe.defineCMacro("ENABLE_LZO", null);
-
         exe.linkSystemLibrary("lzo2");
     }
 
     if (opts.enable_zstd) {
         exe.addIncludePath(append(prefix, "zstd/lib"));
-        exe.defineCMacro("ENABLE_ZSTD", null);
 
         exe.addCSourceFiles(&[_][]const u8{
             append(prefix, "zstd/lib/decompress/zstd_decompress.c"),
@@ -271,10 +263,6 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         if (arch.isX86()) {
             exe.addAssemblyFile(append(prefix, "zstd/lib/decompress/huf_decompress_amd64.S"));
         }
-    }
-
-    if (opts.enable_xz) {
-        exe.defineCMacro("ENABLE_XZ", null);
     }
 
     // Add squashfuse source files
