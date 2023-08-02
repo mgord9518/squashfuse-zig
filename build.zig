@@ -84,8 +84,6 @@ pub fn build(b: *std.build.Builder) !void {
             .use_system_fuse = use_system_fuse,
 
             .use_libdeflate = use_libdeflate,
-
-            .squashfuse_dir = "./",
         });
 
         exe.addModule("squashfuse", squashfuse_mod);
@@ -104,6 +102,7 @@ pub fn build(b: *std.build.Builder) !void {
                 std.debug.print("FUSE library written in C, C++ or ideally, Zig that somehow doesn't use timespec\n", .{});
                 std.debug.print("Until then, we'll have to deal with no static executables\n\n", .{});
                 std.debug.print("All tools that do not require mounting will still be built\n", .{});
+
                 continue;
             }
         }
@@ -137,8 +136,6 @@ pub fn build(b: *std.build.Builder) !void {
 
         // TODO: test with libdeflate disabled
         .use_libdeflate = true,
-
-        .squashfuse_dir = "./",
     });
 
     const test_options = b.addOptions();
@@ -181,41 +178,36 @@ pub const LinkOptions = struct {
     use_system_fuse: bool = true,
 
     use_libdeflate: bool = true,
-
-    squashfuse_dir: []const u8,
 };
 
-// TODO: remove leak
-fn append(parent: []const u8, child: []const u8) []const u8 {
-    var allocator = std.heap.page_allocator;
-
-    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ parent, child }) catch unreachable;
+pub inline fn thisDir() []const u8 {
+    return comptime std.fs.path.dirname(@src().file) orelse unreachable;
 }
 
 pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
-    const prefix = opts.squashfuse_dir;
+    const prefix = thisDir();
 
     if (opts.enable_zlib) {
         if (opts.use_libdeflate) {
-            exe.addIncludePath(.{ .path = append(prefix, "libdeflate") });
+            exe.addIncludePath(.{ .path = prefix ++ "/libdeflate" });
 
             exe.addCSourceFiles(&[_][]const u8{
-                append(prefix, "libdeflate/lib/adler32.c"),
-                append(prefix, "libdeflate/lib/crc32.c"),
-                append(prefix, "libdeflate/lib/deflate_decompress.c"),
-                append(prefix, "libdeflate/lib/utils.c"),
-                append(prefix, "libdeflate/lib/zlib_decompress.c"),
+                prefix ++ "/libdeflate/lib/adler32.c",
+                prefix ++ "/libdeflate/lib/crc32.c",
+                prefix ++ "/libdeflate/lib/deflate_decompress.c",
+                prefix ++ "/libdeflate/lib/utils.c",
+                prefix ++ "/libdeflate/lib/zlib_decompress.c",
             }, &[_][]const u8{});
 
             const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
             if (arch.isX86()) {
                 exe.addCSourceFile(.{
-                    .file = .{ .path = append(prefix, "libdeflate/lib/x86/cpu_features.c") },
+                    .file = .{ .path = prefix ++ "/libdeflate/lib/x86/cpu_features.c" },
                     .flags = &[_][]const u8{},
                 });
             } else if (arch.isARM()) {
                 exe.addCSourceFile(.{
-                    .file = .{ .path = append(prefix, "libdeflate/lib/arm/cpu_features.c") },
+                    .file = .{ .path = prefix ++ "/libdeflate/lib/arm/cpu_features.c" },
                     .flags = &[_][]const u8{},
                 });
             }
@@ -243,14 +235,14 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             //    exe.addCSourceFile("libfuse/lib/compat.c", &[_][]const u8{});
 
             // TODO: automatically build/ vendor
-            exe.addObjectFile(.{ .path = "libfuse/build/lib/libfuse3.a" });
+            exe.addObjectFile(.{ .path = prefix ++ "/libfuse/build/lib/libfuse3.a" });
         }
     }
 
     if (opts.enable_lz4) {
-        exe.addIncludePath(.{ .path = append(prefix, "lz4/lib") });
+        exe.addIncludePath(.{ .path = prefix ++ "/lz4/lib" });
         exe.addCSourceFile(.{
-            .file = .{ .path = append(prefix, "lz4/lib/lz4.c") },
+            .file = .{ .path = prefix ++ "/lz4/lib/lz4.c" },
             .flags = &[_][]const u8{},
         });
     }
@@ -261,44 +253,44 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     }
 
     if (opts.enable_zstd) {
-        exe.addIncludePath(.{ .path = append(prefix, "zstd/lib") });
+        exe.addIncludePath(.{ .path = prefix ++ "/zstd/lib" });
 
         exe.addCSourceFiles(&[_][]const u8{
-            append(prefix, "zstd/lib/decompress/zstd_decompress.c"),
-            append(prefix, "zstd/lib/decompress/zstd_decompress_block.c"),
-            append(prefix, "zstd/lib/decompress/zstd_ddict.c"),
-            append(prefix, "zstd/lib/decompress/huf_decompress.c"),
-            append(prefix, "zstd/lib/common/zstd_common.c"),
-            append(prefix, "zstd/lib/common/error_private.c"),
-            append(prefix, "zstd/lib/common/entropy_common.c"),
-            append(prefix, "zstd/lib/common/fse_decompress.c"),
-            append(prefix, "zstd/lib/common/xxhash.c"),
+            prefix ++ "/zstd/lib/decompress/zstd_decompress.c",
+            prefix ++ "/zstd/lib/decompress/zstd_decompress_block.c",
+            prefix ++ "/zstd/lib/decompress/zstd_ddict.c",
+            prefix ++ "/zstd/lib/decompress/huf_decompress.c",
+            prefix ++ "/zstd/lib/common/zstd_common.c",
+            prefix ++ "/zstd/lib/common/error_private.c",
+            prefix ++ "/zstd/lib/common/entropy_common.c",
+            prefix ++ "/zstd/lib/common/fse_decompress.c",
+            prefix ++ "/zstd/lib/common/xxhash.c",
         }, &[_][]const u8{});
 
         // Add x86_64-specific assembly if possible
         const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
         if (arch.isX86()) {
             exe.addAssemblyFile(.{
-                .path = append(prefix, "zstd/lib/decompress/huf_decompress_amd64.S"),
+                .path = prefix ++ "/zstd/lib/decompress/huf_decompress_amd64.S",
             });
         }
     }
 
     // Add squashfuse source files
-    exe.addIncludePath(.{ .path = append(prefix, "squashfuse") });
+    exe.addIncludePath(.{ .path = prefix ++ "/squashfuse" });
     exe.addCSourceFiles(&[_][]const u8{
-        append(prefix, "squashfuse/fs.c"),
-        append(prefix, "squashfuse/table.c"),
-        append(prefix, "squashfuse/xattr.c"),
-        append(prefix, "squashfuse/cache.c"),
-        append(prefix, "squashfuse/dir.c"),
-        append(prefix, "squashfuse/file.c"),
-        append(prefix, "squashfuse/nonstd-makedev.c"),
-        append(prefix, "squashfuse/nonstd-pread.c"),
-        append(prefix, "squashfuse/nonstd-stat.c"),
-        append(prefix, "squashfuse/stat.c"),
-        append(prefix, "squashfuse/stack.c"),
-        append(prefix, "squashfuse/swap.c"),
+        prefix ++ "/squashfuse/fs.c",
+        prefix ++ "/squashfuse/table.c",
+        prefix ++ "/squashfuse/xattr.c",
+        prefix ++ "/squashfuse/cache.c",
+        prefix ++ "/squashfuse/dir.c",
+        prefix ++ "/squashfuse/file.c",
+        prefix ++ "/squashfuse/nonstd-makedev.c",
+        prefix ++ "/squashfuse/nonstd-pread.c",
+        prefix ++ "/squashfuse/nonstd-stat.c",
+        prefix ++ "/squashfuse/stat.c",
+        prefix ++ "/squashfuse/stack.c",
+        prefix ++ "/squashfuse/swap.c",
     }, &[_][]const u8{});
 
     exe.linkLibC();
