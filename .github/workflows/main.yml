@@ -14,7 +14,7 @@ jobs:
     - name: Install deps
       run: |
         sudo apt update
-        sudo apt install libfuse3-dev liblzo2-dev meson ninja-build autopoint po4a
+        sudo apt install liblzo2-dev
         git clone https://github.com/mgord9518/libfuse
         git clone https://github.com/ebiggers/libdeflate
         git clone https://github.com/facebook/zstd
