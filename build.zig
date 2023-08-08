@@ -205,7 +205,7 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
                     .file = .{ .path = prefix ++ "/libdeflate/lib/x86/cpu_features.c" },
                     .flags = &[_][]const u8{},
                 });
-            } else if (arch.isARM()) {
+            } else if (arch.isARM() or arch.isAARCH64()) {
                 exe.addCSourceFile(.{
                     .file = .{ .path = prefix ++ "/libdeflate/lib/arm/cpu_features.c" },
                     .flags = &[_][]const u8{},
