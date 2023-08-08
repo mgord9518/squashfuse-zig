@@ -15,7 +15,7 @@ pub fn build(b: *std.build.Builder) !void {
     const allocator = b.allocator;
 
     // TODO: add system flags for compression algos
-    const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: true)") orelse true;
+    const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: false)") orelse false;
     const enable_zlib = b.option(bool, "enable-zlib", "enable zlib decompression (default: true)") orelse true;
     const use_libdeflate = b.option(bool, "use-libdeflate", "replace zlib with libdeflate (faster implementation; default: true)") orelse true;
     const enable_lz4 = b.option(bool, "enable-lz4", "enable lz4 decompression (default: true)") orelse true;
@@ -73,7 +73,7 @@ pub fn build(b: *std.build.Builder) !void {
         exe.target = target;
         exe.optimize = optimize;
 
-        linkVendored(exe, .{
+        link(exe, .{
             .enable_lz4 = enable_lz4,
             .enable_lzo = enable_lzo,
             .enable_zlib = enable_zlib,
@@ -126,7 +126,7 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = executable_list.items[0].optimize,
     });
 
-    linkVendored(unit_tests, .{
+    link(unit_tests, .{
         .enable_lz4 = true,
         // TODO: add LZO
         .enable_lzo = false,
@@ -175,7 +175,7 @@ pub const LinkOptions = struct {
     enable_xz: bool,
 
     enable_fuse: bool = false,
-    use_system_fuse: bool = true,
+    use_system_fuse: bool = false,
 
     use_libdeflate: bool = true,
 };
@@ -184,7 +184,7 @@ pub inline fn thisDir() []const u8 {
     return comptime std.fs.path.dirname(@src().file) orelse unreachable;
 }
 
-pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
+pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     const prefix = thisDir();
 
     if (opts.enable_zlib) {
@@ -212,6 +212,10 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
                 });
             }
         } else {
+            // TODO: maybe vendor zlib? Idk, I don't see the benefit. Anyone
+            // I imagine anyone specifically choosing zlib probably wants it
+            // as it's a system library on essentially every Linux distro ever
+            // created
             exe.linkSystemLibrary("zlib");
         }
     }
@@ -220,22 +224,50 @@ pub fn linkVendored(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         if (opts.use_system_fuse) {
             exe.linkSystemLibrary("fuse3");
         } else {
-            //    exe.addCSourceFile("libfuse/lib/fuse.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_loop.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_loop_mt.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_lowlevel.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_opt.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_signals.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/buffer.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/cuse_lowlevel.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/helper.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/modules/subdir.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/mount_util.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/fuse_log.c", &[_][]const u8{});
-            //    exe.addCSourceFile("libfuse/lib/compat.c", &[_][]const u8{});
+            // TODO: configurable build opts
+            exe.defineCMacro("FUSERMOUNT_DIR", "\"/usr/local/bin\"");
+            exe.defineCMacro("_REENTRANT", null);
+            exe.defineCMacro("HAVE_LIBFUSE_PRIVATE_CONFIG_H", null);
+            exe.defineCMacro("_FILE_OFFSET_BITS", "64");
+            exe.defineCMacro("FUSE_USE_VERSION", "312");
 
-            // TODO: automatically build/ vendor
-            exe.addObjectFile(.{ .path = prefix ++ "/libfuse/build/lib/libfuse3.a" });
+            exe.addIncludePath(.{ .path = prefix ++ "/libfuse/include" });
+            exe.addIncludePath(.{ .path = prefix ++ "/libfuse_config" });
+
+            exe.addCSourceFiles(&[_][]const u8{
+                prefix ++ "/libfuse/lib/fuse_loop.c",
+                prefix ++ "/libfuse/lib/fuse_lowlevel.c",
+                prefix ++ "/libfuse/lib/fuse_opt.c",
+                prefix ++ "/libfuse/lib/fuse_signals.c",
+
+                prefix ++ "/libfuse/lib/buffer.c",
+                prefix ++ "/libfuse/lib/compat.c",
+                prefix ++ "/libfuse/lib/fuse.c",
+                prefix ++ "/libfuse/lib/fuse_log.c",
+                prefix ++ "/libfuse/lib/fuse_loop_mt.c",
+
+                prefix ++ "/libfuse/lib/mount.c",
+
+                prefix ++ "/libfuse/lib/mount_util.c",
+
+                prefix ++ "/libfuse/lib/modules/iconv.c",
+                prefix ++ "/libfuse/lib/modules/subdir.c",
+                prefix ++ "/libfuse/lib/helper.c",
+                prefix ++ "/libfuse/lib/cuse_lowlevel.c",
+            }, &[_][]const u8{
+                "-Wall",
+                "-Winvalid-pch",
+                "-Wextra",
+                "-Wno-sign-compare",
+                "-Wstrict-prototypes",
+                "-Wmissing-declarations",
+                "-Wwrite-strings",
+                "-Wno-strict-aliasing",
+                "-Wno-unused-result",
+                "-Wint-conversion",
+
+                "-fPIC",
+            });
         }
     }
 

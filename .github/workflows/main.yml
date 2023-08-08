@@ -21,17 +21,6 @@ jobs:
         git clone https://github.com/lz4/lz4
         git clone https://github.com/Hejsil/zig-clap
 
-    # TODO: do this in build.zig
-    - name: Build FUSE3
-      run: |
-        cd libfuse
-        mkdir build
-        cd build
-        meson ..
-        meson configure -Ddefault_library=static -Dbuildtype=release
-        ninja
-        cd ../../
-
     - name: Build (x86_64)
       run: |
         # All compression algos
