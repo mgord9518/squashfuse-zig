@@ -21,6 +21,7 @@ pub const SquashFsError = error{
     InvalidVersion, // Unsupported version
     InvalidCompression, // Unsupported compression algorithm
     UnsupportedFeature, // Unsupported feature
+    NotRegularFile,
 };
 
 // Converts a C error code to a Zig error enum
@@ -117,16 +118,26 @@ pub const SquashFs = struct {
         pos: u64 = 0,
 
         /// Reads the link target into `buf`
-        pub fn readLink(self: *Inode, buf: []u8) !void {
+        pub fn readLink(self: *Inode, buf: []u8) ![]const u8 {
             var size = buf.len;
 
-            try SquashFsErrorFromInt(c.sqfs_readlink(&self.parent.internal, &self.internal, buf.ptr, &size));
+            const err = c.sqfs_readlink(&self.parent.internal, &self.internal, buf.ptr, &size);
+            try SquashFsErrorFromInt(err);
+
+            return std.mem.sliceTo(
+                @as([*:0]const u8, @ptrCast(buf.ptr)),
+                0,
+            );
         }
 
         /// Wrapper of `sqfs_read_range`
         /// Use for reading one byte buffer at a time
         /// Retruns the amount of bytes read
         pub fn read(self: *Inode, buf: []u8) !usize {
+            if (self.kind != .file) {
+                return SquashFsError.NotRegularFile;
+            }
+
             // squashfuse writes the amount of bytes read back into the `buffer
             // length` variable, so we create that here
             var buf_len: c.sqfs_off_t = @intCast(buf.len);
@@ -382,11 +393,13 @@ pub const SquashFs = struct {
 
                         // Append null byte
                         try self.name_buffer.append('\x00');
+
                         const path = self.name_buffer.items[0 .. self.name_buffer.items.len - 1 :0];
+                        const basename = self.name_buffer.items[dirname_len .. self.name_buffer.items.len - 1 :0];
 
                         return .{
                             .dir = containing.iter.dir,
-                            .basename = self.name_buffer.items[dirname_len..],
+                            .basename = basename,
                             .id = entry.id,
                             .parent = entry.parent,
                             .path = path,
