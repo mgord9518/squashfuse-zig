@@ -135,10 +135,12 @@ pub const SquashFs = struct {
             );
         }
 
+        // TODO: handle buffer when too small
         pub fn readLinkZ(self: *Inode, buf: []u8) ![:0]const u8 {
-            try std.fmt.bufPrintZ(buf, "{s}", .{
-                try self.readLink,
-            });
+            const link_target = try self.readLink(buf);
+            buf[link_target.len] = '\x00';
+
+            return buf[0..link_target.len :0];
         }
 
         /// Wrapper of `sqfs_read_range`
