@@ -121,13 +121,24 @@ pub const SquashFs = struct {
         pub fn readLink(self: *Inode, buf: []u8) ![]const u8 {
             var size = buf.len;
 
-            const err = c.sqfs_readlink(&self.parent.internal, &self.internal, buf.ptr, &size);
+            const err = c.sqfs_readlink(
+                &self.parent.internal,
+                &self.internal,
+                buf.ptr,
+                &size,
+            );
             try SquashFsErrorFromInt(err);
 
             return std.mem.sliceTo(
                 @as([*:0]const u8, @ptrCast(buf.ptr)),
                 0,
             );
+        }
+
+        pub fn readLinkZ(self: *Inode, buf: []u8) ![:0]const u8 {
+            try std.fmt.bufPrintZ(buf, "{s}", .{
+                try self.readLink,
+            });
         }
 
         /// Wrapper of `sqfs_read_range`
