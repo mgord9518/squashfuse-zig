@@ -57,7 +57,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "enable_zstd", enable_zstd);
     exe_options.addOption(bool, "use_zig_zstd", use_zig_zstd);
 
-    const squashfuse_mod = b.addModule("squashfuse", .{
+    const squashfuse_module = b.addModule("squashfuse", .{
         .source_file = .{
             .path = "lib.zig",
         },
@@ -69,7 +69,7 @@ pub fn build(b: *std.build.Builder) !void {
         },
     });
 
-    const clap_mod = b.addModule("clap", .{
+    const clap_module = b.addModule("clap", .{
         .source_file = .{ .path = "zig-clap/clap.zig" },
     });
 
@@ -90,8 +90,8 @@ pub fn build(b: *std.build.Builder) !void {
             .use_libdeflate = use_libdeflate,
         });
 
-        exe.addModule("squashfuse", squashfuse_mod);
-        exe.addModule("clap", clap_mod);
+        exe.addModule("squashfuse", squashfuse_module);
+        exe.addModule("clap", clap_module);
 
         if (std.mem.eql(u8, exe.name, "squashfuse")) {
             // Cannot currently build with FUSE when using musl, so sadly the
@@ -158,7 +158,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_options.addOption(bool, "enable_zstd", true);
     test_options.addOption(bool, "use_zig_zstd", true);
 
-    const squashfuse_test_mod = b.addModule("squashfuse", .{
+    const squashfuse_test_module = b.addModule("squashfuse", .{
         .source_file = .{
             .path = "lib.zig",
         },
@@ -170,12 +170,16 @@ pub fn build(b: *std.build.Builder) !void {
         },
     });
 
-    unit_tests.addModule("squashfuse", squashfuse_test_mod);
+    unit_tests.addModule("squashfuse", squashfuse_test_module);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+}
+
+pub inline fn thisDir() []const u8 {
+    return comptime std.fs.path.dirname(@src().file) orelse unreachable;
 }
 
 pub const LinkOptions = struct {
@@ -191,8 +195,27 @@ pub const LinkOptions = struct {
     use_libdeflate: bool = true,
 };
 
-pub inline fn thisDir() []const u8 {
-    return comptime std.fs.path.dirname(@src().file) orelse unreachable;
+pub fn module(b: *std.Build, opts: LinkOptions) *std.Build.Module {
+    const prefix = thisDir();
+
+    const lib_options = b.addOptions();
+    lib_options.addOption(bool, "enable_xz", opts.enable_xz);
+    lib_options.addOption(bool, "enable_zlib", opts.enable_zlib);
+    lib_options.addOption(bool, "use_libdeflate", opts.use_libdeflate);
+    lib_options.addOption(bool, "enable_lzo", opts.enable_lzo);
+    lib_options.addOption(bool, "enable_lz4", opts.enable_lz4);
+    lib_options.addOption(bool, "enable_zstd", opts.enable_zstd);
+    //    lib_options.addOption(bool, "use_zig_zstd", opts.use_zig_zstd);
+
+    return b.createModule(.{
+        .source_file = .{ .path = prefix ++ "/lib.zig" },
+        .dependencies = &.{
+            .{
+                .name = "build_options",
+                .module = lib_options.createModule(),
+            },
+        },
+    });
 }
 
 pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
