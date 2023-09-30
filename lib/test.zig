@@ -20,7 +20,6 @@ test "open SquashFS image (zlib)" {
 }
 
 // TODO: more tests
-//
 fn testWalk(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
     var root_inode = sqfs.getRootInode();
 
@@ -103,11 +102,19 @@ fn testRead(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
 
     inode = file_tree_hashmap.get("2/another dir/sparse_file").?.inode();
     read_bytes = try inode.read(&buf);
-    try expect(std.mem.eql(u8, buf[0..read_bytes], &std.mem.zeroes([1024 * 64]u8)));
+    try expect(std.mem.eql(
+        u8,
+        buf[0..read_bytes],
+        &std.mem.zeroes([1024 * 64]u8),
+    ));
 
     inode = file_tree_hashmap.get("2/text").?.inode();
     read_bytes = try inode.read(&buf);
-    try expect(std.mem.eql(u8, buf[0..read_bytes], text_contents));
+    try expect(std.mem.eql(
+        u8,
+        buf[0..read_bytes],
+        text_contents,
+    ));
 }
 
 test "read" {

@@ -1,6 +1,6 @@
 .{
 	.name = "squashfuse-zig",
-	.version = "0.0.38",
+	.version = "0.0.39",
 
 	// TODO: add deps
 //	.dependancies = .{

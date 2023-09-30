@@ -1,8 +1,6 @@
 const std = @import("std");
 const io = std.io;
 const os = std.os;
-const span = std.mem.span;
-const expect = std.testing.expect;
 const fs = std.fs;
 const xz = std.compress.xz;
 const zstd = std.compress.zstd;
@@ -16,11 +14,11 @@ const c = @cImport({
 });
 
 pub const SquashFsError = error{
-    Error, // Generic error
-    InvalidFormat, // Unknown file format
-    InvalidVersion, // Unsupported version
-    InvalidCompression, // Unsupported compression algorithm
-    UnsupportedFeature, // Unsupported feature
+    Error,
+    InvalidFormat,
+    InvalidVersion,
+    InvalidCompression,
+    UnsupportedFeature,
     NotRegularFile,
 };
 
@@ -70,7 +68,7 @@ pub const SquashFs = struct {
                 .minor = undefined,
                 .patch = 0,
             },
-            .file = try std.fs.cwd().openFile(path, .{}),
+            .file = try fs.cwd().openFile(path, .{}),
         };
 
         // Populate internal squashfuse struct
@@ -100,9 +98,17 @@ pub const SquashFs = struct {
     pub inline fn getInode(sqfs: *SquashFs, id: InodeId) !Inode {
         var sqfs_inode: c.sqfs_inode = undefined;
 
-        try SquashFsErrorFromInt(c.sqfs_inode_get(&sqfs.internal, &sqfs_inode, id));
+        try SquashFsErrorFromInt(c.sqfs_inode_get(
+            &sqfs.internal,
+            &sqfs_inode,
+            id,
+        ));
 
-        return Inode{ .internal = sqfs_inode, .parent = sqfs, .kind = @enumFromInt(sqfs_inode.base.inode_type) };
+        return Inode{
+            .internal = sqfs_inode,
+            .parent = sqfs,
+            .kind = @enumFromInt(sqfs_inode.base.inode_type),
+        };
     }
 
     pub inline fn getRootInode(sqfs: *SquashFs) Inode {
@@ -155,15 +161,13 @@ pub const SquashFs = struct {
             // length` variable, so we create that here
             var buf_len: c.sqfs_off_t = @intCast(buf.len);
 
-            const err = c.sqfs_read_range(
+            try SquashFsErrorFromInt(c.sqfs_read_range(
                 &self.parent.internal,
                 &self.internal,
                 @intCast(self.pos),
                 &buf_len,
                 @ptrCast(buf),
-            );
-
-            try SquashFsErrorFromInt(err);
+            ));
 
             self.pos += @intCast(buf_len);
 
@@ -213,7 +217,7 @@ pub const SquashFs = struct {
             return @intCast(self.internal.xtra.reg.file_size);
         }
 
-        pub const Reader = std.io.Reader(Inode, std.os.ReadError, read);
+        pub const Reader = io.Reader(Inode, os.ReadError, read);
 
         pub fn reader(self: *Inode) Reader {
             return .{ .context = self };
@@ -229,8 +233,11 @@ pub const SquashFs = struct {
         pub fn statC(self: *Inode) !os.Stat {
             var st = std.mem.zeroes(os.Stat);
 
-            const err = c.sqfs_stat(&self.parent.internal, &self.internal, @ptrCast(&st));
-            try SquashFsErrorFromInt(err);
+            try SquashFsErrorFromInt(c.sqfs_stat(
+                &self.parent.internal,
+                &self.internal,
+                @ptrCast(&st),
+            ));
 
             return st;
         }
@@ -245,9 +252,18 @@ pub const SquashFs = struct {
             // Open dir
             // TODO: add offset
             var dir: c.sqfs_dir = undefined;
-            try SquashFsErrorFromInt(c.sqfs_dir_open(&self.parent.internal, &self.internal, &dir, 0));
+            try SquashFsErrorFromInt(c.sqfs_dir_open(
+                &self.parent.internal,
+                &self.internal,
+                &dir,
+                0,
+            ));
 
-            return .{ .dir = self.*, .internal = dir, .parent = self.parent };
+            return .{
+                .dir = self.*,
+                .internal = dir,
+                .parent = self.parent,
+            };
         }
 
         pub const Iterator = struct {
@@ -385,7 +401,7 @@ pub const SquashFs = struct {
                         self.name_buffer.shrinkRetainingCapacity(dirname_len);
 
                         if (self.name_buffer.items.len != 0) {
-                            try self.name_buffer.append(std.fs.path.sep);
+                            try self.name_buffer.append(fs.path.sep);
                             dirname_len += 1;
                         }
 
@@ -404,7 +420,6 @@ pub const SquashFs = struct {
                             }
                         }
 
-                        // Append null byte
                         try self.name_buffer.append('\x00');
 
                         const path = self.name_buffer.items[0 .. self.name_buffer.items.len - 1 :0];
@@ -445,15 +460,14 @@ pub const SquashFs = struct {
                     const fsize: usize = self.internal.xtra.reg.file_size;
 
                     while (off < fsize) {
-                        //                        const read_bytes = try self.read(buf, off);
                         const read_bytes = try self.read(buf);
                         off += read_bytes;
 
                         _ = try f.write(buf[0..read_bytes]);
                     }
 
-                    // Change the mode of the file to match the inode contained in the
-                    // SquashFS image
+                    // Change the mode of the file to match the inode contained
+                    // in the SquashFS image
                     const st = try self.stat();
                     try f.chmod(st.mode);
                 },
@@ -462,8 +476,29 @@ pub const SquashFs = struct {
                     try cwd.makeDir(dest);
                 },
 
+                .sym_link => {
+                    var link_target_buf: [os.PATH_MAX]u8 = undefined;
+
+                    const link_target = try self.readLink(&link_target_buf);
+
+                    // TODO: check if dir
+                    // TODO: why does it make a difference? squashfuse appears
+                    // to just call `symlink` on the target
+                    try cwd.symLink(
+                        link_target,
+                        dest,
+                        .{ .is_directory = false },
+                    );
+                },
+
                 // TODO: implement for other types
-                else => @panic("NEI for file type"),
+                else => {
+                    var panic_buf: [64]u8 = undefined;
+
+                    const panic_str = try std.fmt.bufPrint(&panic_buf, "Inode.extract not yet implemented for file type `{s}`", .{@tagName(self.kind)});
+
+                    @panic(panic_str);
+                },
             }
         }
     };
@@ -478,8 +513,8 @@ pub const SquashFs = struct {
             named_pipe,
             unix_domain_socket,
 
-            // Not really sure what these are tbh, but squashfuse has entries for
-            // them
+            // Not really sure what these are tbh, but squashfuse has entries
+            // for them
             l_directory,
             l_file,
             l_sym_link,
@@ -492,7 +527,7 @@ pub const SquashFs = struct {
 };
 
 // I'm sure there's a better way to do this...
-// Zig won't compile them in if they aren't used, but this still feels like acrime
+// Zig won't compile them in if they aren't used, but this still feels like a
 // crime.
 extern fn zig_zlib_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
 extern fn zig_xz_decode([*]u8, usize, [*]u8, *usize) c.sqfs_err;
@@ -528,7 +563,7 @@ export fn sqfs_decompressor_get(kind: SquashFs.Compression) ?*const fn ([*]u8, u
 usingnamespace if (build_options.enable_xz)
     struct {
         export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-            var stream = std.io.fixedBufferStream(in[0..in_size]);
+            var stream = io.fixedBufferStream(in[0..in_size]);
 
             var allocator = std.heap.c_allocator;
 
@@ -610,7 +645,7 @@ usingnamespace if (build_options.enable_zstd)
     if (build_options.use_zig_zstd)
         struct {
             export fn zig_zstd_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-                var stream = std.io.fixedBufferStream(in[0..in_size]);
+                var stream = io.fixedBufferStream(in[0..in_size]);
 
                 var allocator = std.heap.c_allocator;
 

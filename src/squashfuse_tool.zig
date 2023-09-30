@@ -1,4 +1,7 @@
+// FUSE-less tool for reading SquashFS files
+
 const std = @import("std");
+const io = std.io;
 const fmt = std.fmt;
 const clap = @import("clap");
 
@@ -29,10 +32,11 @@ const Version = struct {
     }
 };
 
+// TODO: import from build.zig.zon
 const version = Version{
     .major = 0,
     .minor = 0,
-    .patch = 1,
+    .patch = 39,
 };
 
 pub fn main() !void {
@@ -44,12 +48,26 @@ pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help            display this help and exit
         \\
+        \\    --extract <str>   extract contents of archive to path
+        \\    --list            list out archive tree
+        \\
         \\    --offset <usize>  access at an offset
         \\    --version         print the current version
         \\<str>...
     );
 
-    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{});
+    var diag = clap.Diagnostic{};
+
+    var res = clap.parse(
+        clap.Help,
+        &params,
+        clap.parsers.default,
+        .{ .diagnostic = &diag },
+    ) catch |err| {
+        // TODO: custom error reporting
+        try diag.report(io.getStdErr().writer(), err);
+        return;
+    };
     defer res.deinit();
 
     var reset: []const u8 = "\x1b[0;0m";
@@ -174,12 +192,62 @@ pub fn main() !void {
         };
     }
 
-    var root_inode = try sqfs.getInode(sqfs.internal.sb.root_inode);
+    var root_inode = sqfs.getRootInode();
+    var walker = try root_inode.walk(allocator);
+
+    defer walker.deinit();
+
+    if (res.args.extract) |dest| {
+        try extractArchive(
+            allocator,
+            &sqfs,
+            dest,
+            .{ .verbose = true },
+        );
+    } else if (res.args.list != 0) {
+        while (try walker.next()) |entry| {
+            try stdout.print("{s}\n", .{entry.path});
+        }
+    }
+}
+
+const ExtractArchiveOptions = struct {
+    verbose: bool = false,
+};
+
+fn extractArchive(
+    allocator: std.mem.Allocator,
+    sqfs: *SquashFs,
+    dest: []const u8,
+    opts: ExtractArchiveOptions,
+) !void {
+    var stdout = std.io.getStdOut().writer();
+
+    var root_inode = sqfs.getRootInode();
+
     var walker = try root_inode.walk(allocator);
     defer walker.deinit();
 
-    // Iterate over the SquashFS image and print their paths to stdout
+    const cwd = std.fs.cwd();
+
+    try cwd.makeDir(dest);
+
+    // Iterate over the SquashFS image and extract each item
     while (try walker.next()) |entry| {
-        try stdout.print("{s}\n", .{entry.path});
+        var path_buf: [std.os.PATH_MAX]u8 = undefined;
+        const prefixed_dest = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{
+            dest,
+            entry.path,
+        });
+
+        if (opts.verbose) {
+            try stdout.print("{s}\n", .{prefixed_dest});
+        }
+
+        // TODO: flag to change buf size
+        var buf: [4096]u8 = undefined;
+
+        var inode = entry.inode();
+        try inode.extract(&buf, prefixed_dest);
     }
 }

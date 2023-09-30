@@ -2,8 +2,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 fn initExecutable(b: *std.build.Builder, name: []const u8) !*std.Build.Step.Compile {
-    var buf: [256]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "src/{s}.zig", .{name});
+    const path = try std.fmt.allocPrint(
+        b.allocator,
+        "src/{s}.zig",
+        .{name},
+    );
+    defer b.allocator.free(path);
 
     return b.addExecutable(.{
         .name = name,
@@ -24,15 +28,15 @@ pub fn build(b: *std.build.Builder) !void {
     const enable_xz = b.option(bool, "enable-xz", "enable xz decompression (default: false)") orelse false;
     const enable_lzo = b.option(bool, "enable-lzo", "enable lz4 decompression (default: false)") orelse false;
 
-    const build_squashfuse = b.option(bool, "build-squashfuse", "whether or not to build main squashfuse executable(default: true)") orelse true;
-    const build_squashfuse_ls = b.option(bool, "build-squashfuse_ls", "whether or not to build extra squashfuse_ls executable(default: true)") orelse true;
+    const build_squashfuse = b.option(bool, "build-squashfuse", "whether or not to build main squashfuse executable (default: true)") orelse true;
+    const build_squashfuse_tool = b.option(bool, "build-squashfuse_tool", "whether or not to build FUSEless squashfuse_tool executable (default: true)") orelse true;
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const executable_names = &[_]?[]const u8{
         if (build_squashfuse) "squashfuse" else null,
-        if (build_squashfuse_ls) "squashfuse_ls" else null,
+        if (build_squashfuse_tool) "squashfuse_tool" else null,
     };
 
     var executable_list = std.ArrayList(*std.Build.Step.Compile).init(allocator);
@@ -110,6 +114,14 @@ pub fn build(b: *std.build.Builder) !void {
         b.installArtifact(exe);
     }
 
+    // TODO: create symlinks in install directory
+    //    if (build_squashfuse_tool) {
+    //        const cwd = std.fs.cwd();
+    //
+    //        cwd.symLink("squashfuse_tool", "zig-out/bin/squashfuse_ls", .{}) catch {};
+    //        cwd.symLink("squashfuse_tool", "zig-out/bin/squashfuse_extract", .{}) catch {};
+    //    }
+
     const run_cmd = b.addRunArtifact(executable_list.items[0]);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -119,7 +131,6 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // TODO: Fix tests
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "lib/test.zig" },
         .target = executable_list.items[0].target,
@@ -231,6 +242,25 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             exe.defineCMacro("_FILE_OFFSET_BITS", "64");
             exe.defineCMacro("FUSE_USE_VERSION", "312");
 
+            exe.defineCMacro("HAVE_COPY_FILE_RANGE", null);
+            exe.defineCMacro("HAVE_FALLOCATE", null);
+            exe.defineCMacro("HAVE_FDATASYNC", null);
+            exe.defineCMacro("HAVE_FORK", null);
+            exe.defineCMacro("HAVE_FSTATAT", null);
+            exe.defineCMacro("HAVE_ICONV", null);
+            exe.defineCMacro("HAVE_OPENAT", null);
+            exe.defineCMacro("HAVE_PIPE2", null);
+            exe.defineCMacro("HAVE_POSIX_FALLOCATE", null);
+            exe.defineCMacro("HAVE_READLINKAT", null);
+            exe.defineCMacro("HAVE_SETXATTR", null);
+            exe.defineCMacro("HAVE_SPLICE", null);
+            exe.defineCMacro("HAVE_STRUCT_ST_STAT_ST_ATIM", null);
+            exe.defineCMacro("HAVE_UTIMENSAT", null);
+            exe.defineCMacro("HAVE_VMSPLICE", null);
+            exe.defineCMacro("PACKAGE_VERSION", "\"3.14.1\"");
+
+            exe.defineCMacro("LIBFUSE_BUILT_WITH_VERSIONED_SYMBOLS", "1");
+
             exe.addIncludePath(.{ .path = prefix ++ "/libfuse/include" });
             exe.addIncludePath(.{ .path = prefix ++ "/libfuse_config" });
 
@@ -310,6 +340,7 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
 
     // Add squashfuse source files
     exe.addIncludePath(.{ .path = prefix ++ "/squashfuse" });
+
     exe.addCSourceFiles(&[_][]const u8{
         prefix ++ "/squashfuse/fs.c",
         prefix ++ "/squashfuse/table.c",
