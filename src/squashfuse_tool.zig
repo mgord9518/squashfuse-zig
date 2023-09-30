@@ -50,6 +50,7 @@ pub fn main() !void {
         \\
         \\    --extract <str>   extract contents of archive to path
         \\    --list            list out archive tree
+        \\    --verbose         enable verbose printing
         \\
         \\    --offset <usize>  access at an offset
         \\    --version         print the current version
@@ -202,7 +203,7 @@ pub fn main() !void {
             allocator,
             &sqfs,
             dest,
-            .{ .verbose = true },
+            .{ .verbose = res.args.verbose != 0 },
         );
     } else if (res.args.list != 0) {
         while (try walker.next()) |entry| {
