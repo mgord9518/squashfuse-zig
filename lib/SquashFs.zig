@@ -92,7 +92,7 @@ pub const SquashFs = struct {
         c.sqfs_table_destroy(&sqfs.internal.id_table);
         c.sqfs_table_destroy(&sqfs.internal.frag_table);
 
-        if (c.sqfs_export_ok(sqfs.internal)) {
+        if (c.sqfs_export_ok(&sqfs.internal) == c.SQFS_OK) {
             c.sqfs_table_destroy(&sqfs.internal.export_table);
         }
 

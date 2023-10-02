@@ -208,6 +208,7 @@ pub fn main() !void {
 
     var file_tree = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
     var squash = Squash{ .image = sqfs, .file_tree = file_tree };
+    defer sqfs.deinit();
 
     var root_inode = squash.image.getRootInode();
     var walker = try root_inode.walk(allocator);
