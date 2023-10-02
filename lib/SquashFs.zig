@@ -88,8 +88,19 @@ pub const SquashFs = struct {
         return sqfs;
     }
 
-    pub inline fn deinit(sqfs: *SquashFs) void {
-        c.sqfs_destroy(&sqfs.internal);
+    pub fn deinit(sqfs: *SquashFs) void {
+        c.sqfs_table_destroy(&sqfs.internal.id_table);
+        c.sqfs_table_destroy(&sqfs.internal.frag_table);
+
+        if (c.sqfs_export_ok(sqfs.internal)) {
+            c.sqfs_table_destroy(&sqfs.internal.export_table);
+        }
+
+        c.sqfs_cache_destroy(&sqfs.internal.md_cache);
+        c.sqfs_cache_destroy(&sqfs.internal.data_cache);
+        c.sqfs_cache_destroy(&sqfs.internal.frag_cache);
+        c.sqfs_cache_destroy(&sqfs.internal.blockidx);
+
         sqfs.file.close();
     }
 
@@ -506,22 +517,22 @@ pub const SquashFs = struct {
     pub const File = struct {
         pub const Kind = enum(u8) {
             directory = 1,
-            file,
-            sym_link,
-            block_device,
-            character_device,
-            named_pipe,
-            unix_domain_socket,
+            file = 2,
+            sym_link = 3,
+            block_device = 4,
+            character_device = 5,
+            named_pipe = 6,
+            unix_domain_socket = 7,
 
             // Not really sure what these are tbh, but squashfuse has entries
             // for them
-            l_directory,
-            l_file,
-            l_sym_link,
-            l_block_device,
-            l_character_device,
-            l_named_pipe,
-            l_unix_domain_socket,
+            l_directory = 8,
+            l_file = 9,
+            l_sym_link = 10,
+            l_block_device = 11,
+            l_character_device = 12,
+            l_named_pipe = 13,
+            l_unix_domain_socket = 14,
         };
     };
 };

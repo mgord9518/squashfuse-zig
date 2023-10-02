@@ -53,28 +53,16 @@ pub const MountError = error{
     ReadOnly,
 };
 
-pub fn MountErrorToEnum(err: MountError) E {
-    return switch (err) {
-        MountError.NoEntry => .no_entry,
-        MountError.Io => .io,
-        MountError.BadFd => .bad_fd,
-        MountError.OutOfMemory => .out_of_memory,
-        MountError.PermissionDenied => .permission_denied,
-        MountError.Busy => .busy,
-        MountError.FileExists => .file_exists,
-        MountError.NotDir => .not_dir,
-        MountError.IsDir => .is_dir,
-        MountError.InvalidArgument => .invalid_argument,
-        MountError.FTableOverflow => .ftable_overflow,
-        MountError.TooManyFiles => .too_many_files,
-        MountError.ExecBusy => .exec_busy,
-        MountError.FileTooLarge => .file_too_large,
-        MountError.ReadOnly => .read_only,
-    };
-}
+extern fn fuse_main_real(argc: c_int, argv: [*]const [*:0]const u8, op: *const LibFuseOperations, op_size: usize, private_data: *const anyopaque) c_int;
 
-extern fn fuse_main_real(argc: c_int, argv: [*]const [*:0]const u8, op: *const OldOperations, op_size: usize, private_data: *const anyopaque) c_int;
-pub fn old_main(allocator: std.mem.Allocator, args: []const [:0]const u8, op: *const OldOperations, private_data: anytype) !void {
+pub fn main(
+    allocator: std.mem.Allocator,
+    args: []const [:0]const u8,
+    comptime operations: anytype,
+    private_data: anytype,
+) !void {
+    const libfuse_ops = comptime genOps(operations);
+
     var result = try allocator.alloc([*:0]const u8, args.len);
     defer allocator.free(result);
 
@@ -84,136 +72,75 @@ pub fn old_main(allocator: std.mem.Allocator, args: []const [:0]const u8, op: *c
     }
 
     const argc: c_int = @intCast(args.len);
-    const op_len = @sizeOf(OldOperations);
-    const data_ptr: *const anyopaque = @ptrCast(&private_data);
 
-    const err = fuse_main_real(argc, result.ptr, op, op_len, data_ptr);
+    const err = fuse_main_real(
+        argc,
+        result.ptr,
+        &libfuse_ops,
+        @sizeOf(LibFuseOperations),
+        &private_data,
+    );
     try FuseErrorFromInt(err);
 }
 
-pub fn main(allocator: std.mem.Allocator, args: []const [:0]const u8, comptime operations: Operations, private_data: anytype) !void {
-    const libfuse_ops = genOps(operations);
-
-    try old_main(allocator, args, &libfuse_ops, private_data);
-}
-
 // TODO: add all operations
-pub const Operations = struct {
-    //    real_opt: Operations,
-    open: ?fn (
-        path: [:0]const u8,
-        fi: *FileInfo,
-    ) MountError!void = null,
-
-    readdir: ?fn (
-        path: [:0]const u8,
-        fd: FillDir,
-        fi: *FileInfo,
-        flags: ReadDirFlags,
-    ) MountError!void = null,
-
-    getattr: ?fn (
-        path: [:0]const u8,
-        fi: *FileInfo,
-    ) MountError!os.Stat = null,
-
-    read: ?fn (
-        path: [:0]const u8,
-        buf: []u8,
-        offset: u64,
-        fi: *FileInfo,
-    ) MountError!usize = null,
-
-    create: ?fn (
-        path: [:0]const u8,
-        mode: std.fs.File.Mode,
-        fi: *FileInfo,
-    ) MountError!void = null,
-
-    readlink: ?fn (
-        path: [:0]const u8,
-        buf: []u8,
-    ) MountError![]const u8 = null,
-
-    getxattr: ?fn (
-        path: [:0]const u8,
-        name: [:0]const u8,
-        buf: []u8,
-    ) MountError!void = null,
-
-    opendir: ?fn (
-        path: [:0]const u8,
-        fi: *FileInfo,
-    ) MountError!void = null,
-
-    release: ?fn (
-        path: [:0]const u8,
-        fi: *FileInfo,
-    ) MountError!void = null,
-
-    releasedir: ?fn (
-        path: [:0]const u8,
-        fi: *FileInfo,
-    ) MountError!void = null,
-};
-
-pub fn genOps(
-    comptime new_ops: Operations,
-) OldOperations {
-    var ops = OldOperations{};
+fn genOps(
+    comptime Operations: type,
+) LibFuseOperations {
+    var ops = LibFuseOperations{};
 
     // TODO: refactor
-    if (new_ops.readdir) |readdir| {
+    if (@hasDecl(Operations, "readDir")) {
         ops.readdir = struct {
             pub fn fuse_readdir(path: [*:0]const u8, fd: FillDir, off: linux.off_t, fi: *FileInfo, flags: ReadDirFlags) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
                 _ = off;
 
-                readdir(path_slice, fd, fi, flags) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.readDir(path_slice, fd, fi, flags) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_readdir;
     }
 
-    if (new_ops.open) |opene| {
+    if (@hasDecl(Operations, "open")) {
         ops.open = struct {
             pub fn fuse_open(path: [*:0]const u8, fi: *FileInfo) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                opene(path_slice, fi) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.open(path_slice, fi) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_open;
     }
 
-    if (new_ops.getattr) |getattr| {
+    if (@hasDecl(Operations, "getAttr")) {
         ops.getattr = struct {
             pub fn fuse_getattr(path: [*:0]const u8, stbuf: *os.Stat, fi: *FileInfo) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                stbuf.* = getattr(path_slice, fi) catch |err| {
-                    return MountErrorToEnum(err);
+                stbuf.* = Operations.getAttr(path_slice, fi) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_getattr;
     }
 
-    if (new_ops.read) |read| {
+    if (@hasDecl(Operations, "read")) {
         ops.read = struct {
             pub fn fuse_read(path: [*:0]const u8, b: [*]u8, len: usize, offset: os.off_t, fi: *FileInfo) callconv(.C) c_int {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                const bytes_read = read(path_slice, b[0..len], @intCast(offset), fi) catch |err| {
-                    return @intFromEnum(MountErrorToEnum(err));
+                const bytes_read = Operations.read(path_slice, b[0..len], @intCast(offset), fi) catch |err| {
+                    return @intFromEnum(MountErrorToE(err));
                 };
 
                 return @intCast(bytes_read);
@@ -221,89 +148,89 @@ pub fn genOps(
         }.fuse_read;
     }
 
-    if (new_ops.create) |create| {
+    if (@hasDecl(Operations, "create")) {
         ops.create = struct {
             pub fn fuse_create(path: [*:0]const u8, mode: std.fs.File.Mode, fi: *FileInfo) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                create(path_slice, mode, fi) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.create(path_slice, mode, fi) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_create;
     }
 
-    if (new_ops.readlink) |readlink| {
+    if (@hasDecl(Operations, "readLink")) {
         ops.readlink = struct {
             pub fn fuse_readlink(path: [*:0]const u8, buf: [*]u8, len: usize) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                const link_target = readlink(path_slice, buf[0..len]) catch |err| {
-                    return MountErrorToEnum(err);
+                const link_target = Operations.readLink(path_slice, buf[0..len]) catch |err| {
+                    return MountErrorToE(err);
                 };
 
                 buf[link_target.len] = '\x00';
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_readlink;
     }
 
-    if (new_ops.getxattr) |getxattr| {
+    if (@hasDecl(Operations, "getXAttr")) {
         ops.getxattr = struct {
             pub fn fuse_getxattr(path: [*:0]const u8, name: [*:0]const u8, buf: [*]u8, len: usize) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
                 const name_slice = std.mem.sliceTo(name, 0);
 
-                getxattr(path_slice, name_slice, buf[0..len]) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.getXAttr(path_slice, name_slice, buf[0..len]) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_getxattr;
     }
 
-    if (new_ops.opendir) |opendir| {
+    if (@hasDecl(Operations, "openDir")) {
         ops.opendir = struct {
             pub fn fuse_opendir(path: [*:0]const u8, fi: *FileInfo) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                opendir(path_slice, fi) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.openDir(path_slice, fi) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_opendir;
     }
 
-    if (new_ops.release) |release| {
+    if (@hasDecl(Operations, "release")) {
         ops.release = struct {
             pub fn fuse_release(path: [*:0]const u8, fi: *FileInfo) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                release(path_slice, fi) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.release(path_slice, fi) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_release;
     }
 
-    if (new_ops.releasedir) |releasedir| {
+    if (@hasDecl(Operations, "releaseDir")) {
         ops.releasedir = struct {
             pub fn fuse_releasedir(path: [*:0]const u8, fi: *FileInfo) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
-                releasedir(path_slice, fi) catch |err| {
-                    return MountErrorToEnum(err);
+                Operations.releaseDir(path_slice, fi) catch |err| {
+                    return MountErrorToE(err);
                 };
 
-                return .success;
+                return .SUCCESS;
             }
         }.fuse_releasedir;
     }
@@ -390,7 +317,7 @@ pub const LockFlags = enum(c_int) {
     set_lock_wait = 7,
 };
 
-pub const OldOperations = extern struct {
+pub const LibFuseOperations = extern struct {
     getattr: ?*const fn ([*:0]const u8, *os.Stat, *FileInfo) callconv(.C) E = null,
     readlink: ?*const fn ([*:0]const u8, [*]u8, usize) callconv(.C) E = null,
     mknod: ?*const fn ([*:0]const u8, linux.mode_t, linux.dev_t) callconv(.C) E = null,
@@ -442,42 +369,41 @@ pub const OldOperations = extern struct {
 };
 
 // FUSE uses negated values of system errno
-// Debating on whether they should match the C enum or follow Zig naming
-// conventions
 pub const E = enum(c_int) {
-    success = 0,
-    no_entry = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOENT))),
-    io = -@as(c_int, @intCast(@intFromEnum(std.os.E.IO))),
-    bad_fd = -@as(c_int, @intCast(@intFromEnum(std.os.E.BADF))),
-    out_of_memory = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOMEM))),
-    permission_denied = -@as(c_int, @intCast(@intFromEnum(std.os.E.ACCES))),
-    busy = -@as(c_int, @intCast(@intFromEnum(std.os.E.BUSY))),
-    file_exists = -@as(c_int, @intCast(@intFromEnum(std.os.E.EXIST))),
-    not_dir = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOTDIR))),
-    is_dir = -@as(c_int, @intCast(@intFromEnum(std.os.E.ISDIR))),
-    invalid_argument = -@as(c_int, @intCast(@intFromEnum(std.os.E.INVAL))),
-    ftable_overflow = -@as(c_int, @intCast(@intFromEnum(std.os.E.NFILE))),
-    too_many_files = -@as(c_int, @intCast(@intFromEnum(std.os.E.MFILE))),
-    exec_busy = -@as(c_int, @intCast(@intFromEnum(std.os.E.TXTBSY))),
-    file_too_large = -@as(c_int, @intCast(@intFromEnum(std.os.E.FBIG))),
-    read_only = -@as(c_int, @intCast(@intFromEnum(std.os.E.ROFS))),
+    SUCCESS = 0,
+    NOENT = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOENT))),
+    IO = -@as(c_int, @intCast(@intFromEnum(std.os.E.IO))),
+    BADF = -@as(c_int, @intCast(@intFromEnum(std.os.E.BADF))),
+    NOMEM = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOMEM))),
+    ACCES = -@as(c_int, @intCast(@intFromEnum(std.os.E.ACCES))),
+    BUSY = -@as(c_int, @intCast(@intFromEnum(std.os.E.BUSY))),
+    EXIST = -@as(c_int, @intCast(@intFromEnum(std.os.E.EXIST))),
+    NOTDIR = -@as(c_int, @intCast(@intFromEnum(std.os.E.NOTDIR))),
+    ISDIR = -@as(c_int, @intCast(@intFromEnum(std.os.E.ISDIR))),
+    INVAL = -@as(c_int, @intCast(@intFromEnum(std.os.E.INVAL))),
+    NFILE = -@as(c_int, @intCast(@intFromEnum(std.os.E.NFILE))),
+    MFILE = -@as(c_int, @intCast(@intFromEnum(std.os.E.MFILE))),
+    TXTBSY = -@as(c_int, @intCast(@intFromEnum(std.os.E.TXTBSY))),
+    FBIG = -@as(c_int, @intCast(@intFromEnum(std.os.E.FBIG))),
+    ROFS = -@as(c_int, @intCast(@intFromEnum(std.os.E.ROFS))),
 };
 
-//pub const E = enum(c_int) {
-//    SUCCESS = 0,
-//    NOENT = -@intCast(c_int, @intFromEnum(std.os.E.NOENT)),
-//    IO = -@intCast(c_int, @intFromEnum(std.os.E.IO)),
-//    BADF = -@intCast(c_int, @intFromEnum(std.os.E.BADF)),
-//    NOMEM = -@intCast(c_int, @intFromEnum(std.os.E.NOMEM)),
-//    ACCES = -@intCast(c_int, @intFromEnum(std.os.E.ACCES)),
-//    BUSY = -@intCast(c_int, @intFromEnum(std.os.E.BUSY)),
-//    EXIST = -@intCast(c_int, @intFromEnum(std.os.E.EXIST)),
-//    NOTDIR = -@intCast(c_int, @intFromEnum(std.os.E.NOTDIR)),
-//    ISDIR = -@intCast(c_int, @intFromEnum(std.os.E.ISDIR)),
-//    INVAL = -@intCast(c_int, @intFromEnum(std.os.E.INVAL)),
-//    NFILE = -@intCast(c_int, @intFromEnum(std.os.E.NFILE)),
-//    MFILE = -@intCast(c_int, @intFromEnum(std.os.E.MFILE)),
-//    TXTBSY = -@intCast(c_int, @intFromEnum(std.os.E.TXTBSY)),
-//    FBIG = -@intCast(c_int, @intFromEnum(std.os.E.FBIG)),
-//    ROFS = -@intCast(c_int, @intFromEnum(std.os.E.ROFS)),
-//};
+pub fn MountErrorToE(err: MountError) E {
+    return switch (err) {
+        MountError.NoEntry => .NOENT,
+        MountError.Io => .IO,
+        MountError.BadFd => .BADF,
+        MountError.OutOfMemory => .NOMEM,
+        MountError.PermissionDenied => .ACCES,
+        MountError.Busy => .BUSY,
+        MountError.FileExists => .EXIST,
+        MountError.NotDir => .NOTDIR,
+        MountError.IsDir => .ISDIR,
+        MountError.InvalidArgument => .INVAL,
+        MountError.FTableOverflow => .NFILE,
+        MountError.TooManyFiles => .MFILE,
+        MountError.ExecBusy => .TXTBSY,
+        MountError.FileTooLarge => .FBIG,
+        MountError.ReadOnly => .ROFS,
+    };
+}
