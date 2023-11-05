@@ -19,17 +19,65 @@ pub fn build(b: *std.build.Builder) !void {
     const allocator = b.allocator;
 
     // TODO: add system flags for compression algos
-    const use_system_fuse = b.option(bool, "use-system-fuse", "use system FUSE3 library instead of vendored (default: false)") orelse false;
-    const enable_zlib = b.option(bool, "enable-zlib", "enable zlib decompression (default: true)") orelse true;
-    const use_libdeflate = b.option(bool, "use-libdeflate", "replace zlib with libdeflate (faster implementation; default: true)") orelse true;
-    const enable_lz4 = b.option(bool, "enable-lz4", "enable lz4 decompression (default: true)") orelse true;
-    const enable_zstd = b.option(bool, "enable-zstd", "enable zstd decompression (default: true)") orelse true;
-    const use_zig_zstd = b.option(bool, "use-zig-zstd", "use Zig stdlib zstd implementation (default: false)") orelse false;
-    const enable_xz = b.option(bool, "enable-xz", "enable xz decompression (default: false)") orelse false;
-    const enable_lzo = b.option(bool, "enable-lzo", "enable lz4 decompression (default: false)") orelse false;
+    const use_system_fuse = b.option(
+        bool,
+        "use-system-fuse",
+        "use system FUSE3 library instead of vendored (default: false)",
+    ) orelse false;
 
-    const build_squashfuse = b.option(bool, "build-squashfuse", "whether or not to build main squashfuse executable (default: true)") orelse true;
-    const build_squashfuse_tool = b.option(bool, "build-squashfuse_tool", "whether or not to build FUSEless squashfuse_tool executable (default: true)") orelse true;
+    const enable_zlib = b.option(
+        bool,
+        "enable-zlib",
+        "enable zlib decompression (default: true)",
+    ) orelse true;
+
+    const use_libdeflate = b.option(
+        bool,
+        "use-libdeflate",
+        "replace zlib with libdeflate (faster implementation; default: true)",
+    ) orelse true;
+
+    const enable_lz4 = b.option(
+        bool,
+        "enable-lz4",
+        "enable lz4 decompression (default: true)",
+    ) orelse true;
+
+    const enable_zstd = b.option(
+        bool,
+        "enable-zstd",
+        "enable zstd decompression (default: true)",
+    ) orelse true;
+
+    const use_zig_zstd = b.option(
+        bool,
+        "use-zig-zstd",
+        "use Zig stdlib zstd implementation (default: false)",
+    ) orelse false;
+
+    const enable_xz = b.option(
+        bool,
+        "enable-xz",
+        "enable xz decompression (default: true)",
+    ) orelse true;
+
+    const enable_lzo = b.option(
+        bool,
+        "enable-lzo",
+        "enable lzo decompression (default: false)",
+    ) orelse false;
+
+    const build_squashfuse = b.option(
+        bool,
+        "build-squashfuse",
+        "whether or not to build main squashfuse executable (default: true)",
+    ) orelse true;
+
+    const build_squashfuse_tool = b.option(
+        bool,
+        "build-squashfuse_tool",
+        "whether or not to build FUSEless squashfuse_tool executable (default: true)",
+    ) orelse true;
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -45,8 +93,6 @@ pub fn build(b: *std.build.Builder) !void {
             try executable_list.append(try initExecutable(b, name));
         }
     }
-
-    const abi = executable_list.items[0].target.getAbi();
 
     const exe_options = b.addOptions();
     exe_options.addOption(bool, "enable_xz", enable_xz);
@@ -69,13 +115,20 @@ pub fn build(b: *std.build.Builder) !void {
         },
     });
 
-    const clap_module = b.addModule("clap", .{
-        .source_file = .{ .path = "zig-clap/clap.zig" },
-    });
+    const abi = target.getAbi();
 
     for (executable_list.items) |exe| {
         exe.target = target;
         exe.optimize = optimize;
+
+        const clap_dep = exe.step.owner.dependency("clap", .{
+            .target = exe.target,
+            .optimize = exe.optimize,
+        });
+
+        const clap_module = b.addModule("clap", .{
+            .source_file = clap_dep.path("clap.zig"),
+        });
 
         link(exe, .{
             .enable_lz4 = enable_lz4,
@@ -94,6 +147,10 @@ pub fn build(b: *std.build.Builder) !void {
         exe.addModule("clap", clap_module);
 
         if (std.mem.eql(u8, exe.name, "squashfuse")) {
+
+            // TODO: FIX
+            // This check used to work, maybe another dep besides libfuse now
+            // requires timspec? Needs investigation
             // Cannot currently build with FUSE when using musl, so sadly the
             // main program must be skipped with musl ABI
             if (abi == .musl) {
@@ -188,11 +245,12 @@ pub const LinkOptions = struct {
     enable_lzo: bool,
     enable_zlib: bool,
     enable_xz: bool,
-
     enable_fuse: bool = false,
-    use_system_fuse: bool = false,
 
+    use_system_fuse: bool = false,
     use_libdeflate: bool = true,
+
+    fusermount_dir: []const u8 = "/usr/local/bin",
 };
 
 pub fn module(b: *std.Build, opts: LinkOptions) *std.Build.Module {
@@ -221,45 +279,30 @@ pub fn module(b: *std.Build, opts: LinkOptions) *std.Build.Module {
 pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     const prefix = thisDir();
 
-    if (opts.enable_zlib) {
-        if (opts.use_libdeflate) {
-            exe.addIncludePath(.{ .path = prefix ++ "/libdeflate" });
-
-            exe.addCSourceFiles(&[_][]const u8{
-                prefix ++ "/libdeflate/lib/adler32.c",
-                prefix ++ "/libdeflate/lib/crc32.c",
-                prefix ++ "/libdeflate/lib/deflate_decompress.c",
-                prefix ++ "/libdeflate/lib/utils.c",
-                prefix ++ "/libdeflate/lib/zlib_decompress.c",
-            }, &[_][]const u8{});
-
-            const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
-            if (arch.isX86()) {
-                exe.addCSourceFile(.{
-                    .file = .{ .path = prefix ++ "/libdeflate/lib/x86/cpu_features.c" },
-                    .flags = &[_][]const u8{},
-                });
-            } else if (arch.isARM() or arch.isAARCH64()) {
-                exe.addCSourceFile(.{
-                    .file = .{ .path = prefix ++ "/libdeflate/lib/arm/cpu_features.c" },
-                    .flags = &[_][]const u8{},
-                });
-            }
-        } else {
-            // TODO: maybe vendor zlib? Idk, I don't see the benefit. Anyone
-            // I imagine anyone specifically choosing zlib probably wants it
-            // as it's a system library on essentially every Linux distro ever
-            // created
-            exe.linkSystemLibrary("zlib");
-        }
-    }
-
     if (opts.enable_fuse) {
+        // The directory must be surrounded by quotes so that the C
+        // preprocessor will substitute it as a string literal
+        const quoted_fusermount_dir = std.fmt.allocPrint(
+            exe.step.owner.allocator,
+            "\"{s}\"",
+            .{opts.fusermount_dir},
+        ) catch {
+            @panic("OOM");
+        };
+
         if (opts.use_system_fuse) {
             exe.linkSystemLibrary("fuse3");
         } else {
+            const libfuse_dep = exe.step.owner.dependency("libfuse", .{
+                .target = exe.target,
+                .optimize = exe.optimize,
+            });
+
+            exe.addIncludePath(libfuse_dep.path("include"));
+            exe.addIncludePath(.{ .path = prefix ++ "/libfuse_config" });
+
             // TODO: configurable build opts
-            exe.defineCMacro("FUSERMOUNT_DIR", "\"/usr/local/bin\"");
+            exe.defineCMacro("FUSERMOUNT_DIR", quoted_fusermount_dir);
             exe.defineCMacro("_REENTRANT", null);
             exe.defineCMacro("HAVE_LIBFUSE_PRIVATE_CONFIG_H", null);
             exe.defineCMacro("_FILE_OFFSET_BITS", "64");
@@ -284,50 +327,102 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
 
             exe.defineCMacro("LIBFUSE_BUILT_WITH_VERSIONED_SYMBOLS", "1");
 
-            exe.addIncludePath(.{ .path = prefix ++ "/libfuse/include" });
-            exe.addIncludePath(.{ .path = prefix ++ "/libfuse_config" });
+            const c_files = &[_][]const u8{
+                "lib/fuse_loop.c",
+                "lib/fuse_lowlevel.c",
+                "lib/fuse_opt.c",
+                "lib/fuse_signals.c",
+                "lib/buffer.c",
+                "lib/compat.c",
+                "lib/fuse.c",
+                "lib/fuse_log.c",
+                "lib/fuse_loop_mt.c",
+                "lib/mount.c",
+                "lib/mount_util.c",
+                "lib/modules/iconv.c",
+                "lib/modules/subdir.c",
+                "lib/helper.c",
+                "lib/cuse_lowlevel.c",
+            };
 
-            exe.addCSourceFiles(&[_][]const u8{
-                prefix ++ "/libfuse/lib/fuse_loop.c",
-                prefix ++ "/libfuse/lib/fuse_lowlevel.c",
-                prefix ++ "/libfuse/lib/fuse_opt.c",
-                prefix ++ "/libfuse/lib/fuse_signals.c",
+            for (c_files) |c_file| {
+                exe.addCSourceFile(.{
+                    .file = libfuse_dep.path(c_file),
+                    .flags = &[_][]const u8{
+                        "-Wall",
+                        "-Winvalid-pch",
+                        "-Wextra",
+                        "-Wno-sign-compare",
+                        "-Wstrict-prototypes",
+                        "-Wmissing-declarations",
+                        "-Wwrite-strings",
+                        "-Wno-strict-aliasing",
+                        "-Wno-unused-result",
+                        "-Wint-conversion",
 
-                prefix ++ "/libfuse/lib/buffer.c",
-                prefix ++ "/libfuse/lib/compat.c",
-                prefix ++ "/libfuse/lib/fuse.c",
-                prefix ++ "/libfuse/lib/fuse_log.c",
-                prefix ++ "/libfuse/lib/fuse_loop_mt.c",
+                        "-fPIC",
+                    },
+                });
+            }
+        }
+    }
 
-                prefix ++ "/libfuse/lib/mount.c",
-
-                prefix ++ "/libfuse/lib/mount_util.c",
-
-                prefix ++ "/libfuse/lib/modules/iconv.c",
-                prefix ++ "/libfuse/lib/modules/subdir.c",
-                prefix ++ "/libfuse/lib/helper.c",
-                prefix ++ "/libfuse/lib/cuse_lowlevel.c",
-            }, &[_][]const u8{
-                "-Wall",
-                "-Winvalid-pch",
-                "-Wextra",
-                "-Wno-sign-compare",
-                "-Wstrict-prototypes",
-                "-Wmissing-declarations",
-                "-Wwrite-strings",
-                "-Wno-strict-aliasing",
-                "-Wno-unused-result",
-                "-Wint-conversion",
-
-                "-fPIC",
+    if (opts.enable_zlib) {
+        if (opts.use_libdeflate) {
+            const libdeflate_dep = exe.step.owner.dependency("libdeflate", .{
+                .target = exe.target,
+                .optimize = exe.optimize,
             });
+
+            exe.addIncludePath(libdeflate_dep.path("."));
+
+            // TODO: is there a better way to do this?
+            const c_files = &[_][]const u8{
+                "lib/adler32.c",
+                "lib/crc32.c",
+                "lib/deflate_decompress.c",
+                "lib/utils.c",
+                "lib/zlib_decompress.c",
+            };
+
+            for (c_files) |c_file| {
+                exe.addCSourceFile(.{
+                    .file = libdeflate_dep.path(c_file),
+                    .flags = &[_][]const u8{},
+                });
+            }
+
+            const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
+            if (arch.isX86()) {
+                exe.addCSourceFile(.{
+                    .file = libdeflate_dep.path("lib/x86/cpu_features.c"),
+                    .flags = &[_][]const u8{},
+                });
+            } else if (arch.isARM() or arch.isAARCH64()) {
+                exe.addCSourceFile(.{
+                    .file = libdeflate_dep.path("lib/arm/cpu_features.c"),
+                    .flags = &[_][]const u8{},
+                });
+            }
+        } else {
+            // TODO: maybe vendor zlib? Idk, I don't see the benefit. Anyone
+            // I imagine anyone specifically choosing zlib probably wants it
+            // as it's a system library on essentially every Linux distro ever
+            // created
+            exe.linkSystemLibrary("zlib");
         }
     }
 
     if (opts.enable_lz4) {
-        exe.addIncludePath(.{ .path = prefix ++ "/lz4/lib" });
+        const liblz4_dep = exe.step.owner.dependency("liblz4", .{
+            .target = exe.target,
+            .optimize = exe.optimize,
+        });
+
+        exe.addIncludePath(liblz4_dep.path("lib"));
+
         exe.addCSourceFile(.{
-            .file = .{ .path = prefix ++ "/lz4/lib/lz4.c" },
+            .file = liblz4_dep.path("lib/lz4.c"),
             .flags = &[_][]const u8{},
         });
     }
@@ -338,46 +433,100 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     }
 
     if (opts.enable_zstd) {
-        exe.addIncludePath(.{ .path = prefix ++ "/zstd/lib" });
+        const libzstd_dep = exe.step.owner.dependency("libzstd", .{
+            .target = exe.target,
+            .optimize = exe.optimize,
+        });
 
-        exe.addCSourceFiles(&[_][]const u8{
-            prefix ++ "/zstd/lib/decompress/zstd_decompress.c",
-            prefix ++ "/zstd/lib/decompress/zstd_decompress_block.c",
-            prefix ++ "/zstd/lib/decompress/zstd_ddict.c",
-            prefix ++ "/zstd/lib/decompress/huf_decompress.c",
-            prefix ++ "/zstd/lib/common/zstd_common.c",
-            prefix ++ "/zstd/lib/common/error_private.c",
-            prefix ++ "/zstd/lib/common/entropy_common.c",
-            prefix ++ "/zstd/lib/common/fse_decompress.c",
-            prefix ++ "/zstd/lib/common/xxhash.c",
-        }, &[_][]const u8{});
+        exe.addIncludePath(libzstd_dep.path("lib"));
+
+        const c_files = &[_][]const u8{
+            "lib/decompress/zstd_decompress.c",
+            "lib/decompress/zstd_decompress_block.c",
+            "lib/decompress/zstd_ddict.c",
+            "lib/decompress/huf_decompress.c",
+            "lib/common/zstd_common.c",
+            "lib/common/error_private.c",
+            "lib/common/entropy_common.c",
+            "lib/common/fse_decompress.c",
+            "lib/common/xxhash.c",
+        };
+
+        for (c_files) |c_file| {
+            exe.addCSourceFile(.{
+                .file = libzstd_dep.path(c_file),
+                .flags = &[_][]const u8{},
+            });
+        }
 
         // Add x86_64-specific assembly if possible
         const arch = exe.target.cpu_arch orelse builtin.cpu.arch;
         if (arch.isX86()) {
-            exe.addAssemblyFile(.{
-                .path = prefix ++ "/zstd/lib/decompress/huf_decompress_amd64.S",
+            // TODO: LazyPath for `addAssemblyFile`?
+            // Calling `addCSourceFile` instead works, but is obviously suboptimal
+            exe.addCSourceFile(.{
+                .file = libzstd_dep.path("lib/decompress/huf_decompress_amd64.S"),
+                .flags = &[_][]const u8{},
             });
         }
     }
 
+    const os_tag = exe.target.os_tag orelse builtin.os.tag;
+
     // Add squashfuse source files
     exe.addIncludePath(.{ .path = prefix ++ "/squashfuse" });
 
-    exe.addCSourceFiles(&[_][]const u8{
-        prefix ++ "/squashfuse/fs.c",
-        prefix ++ "/squashfuse/table.c",
-        prefix ++ "/squashfuse/xattr.c",
-        prefix ++ "/squashfuse/cache.c",
-        prefix ++ "/squashfuse/dir.c",
-        prefix ++ "/squashfuse/file.c",
-        prefix ++ "/squashfuse/nonstd-makedev.c",
-        prefix ++ "/squashfuse/nonstd-pread.c",
-        prefix ++ "/squashfuse/nonstd-stat.c",
-        prefix ++ "/squashfuse/stat.c",
-        prefix ++ "/squashfuse/stack.c",
-        prefix ++ "/squashfuse/swap.c",
-    }, &[_][]const u8{});
+    switch (os_tag) {
+        .linux => {
+            exe.defineCMacro("HAVE_LINUX_TYPES_LE16", "1");
+        },
+        .windows => {
+            exe.addIncludePath(.{ .path = prefix ++ "/squashfuse/win" });
+        },
+        else => {},
+    }
+
+    if (opts.enable_lz4) exe.defineCMacro("HAVE_LZ4_H", "1");
+    if (opts.enable_lz4) exe.defineCMacro("HAVE_LZO_LZO1X_H", "1");
+    if (opts.enable_xz) exe.defineCMacro("HAVE_LZMA_H", "1");
+    if (opts.enable_zlib) exe.defineCMacro("HAVE_ZLIB_H", "1");
+    if (opts.enable_zstd) exe.defineCMacro("HAVE_ZSTD_H", "1");
+
+    exe.defineCMacro("HAVE_ASM_BYTEORDER", "1");
+    exe.defineCMacro("HAVE_DECL_FUSE_ADD_DIRENTRY", "1");
+    exe.defineCMacro("HAVE_DECL_FUSE_DAEMONIZE", "1");
+    exe.defineCMacro("HAVE_DLFCN", "1");
+    exe.defineCMacro("HAVE_ENDIAN_H", "1");
+    exe.defineCMacro("HAVE_INTTYPES_H", "1");
+    exe.defineCMacro("HAVE_NEW_FUSE_UNMOUNT", "1");
+    exe.defineCMacro("HAVE_STDINT_H", "1");
+    exe.defineCMacro("HAVE_STDIO_H", "1");
+    exe.defineCMacro("HAVE_STDLIB_H", "1");
+    exe.defineCMacro("HAVE_STRINGS_H", "1");
+    exe.defineCMacro("HAVE_STRING_H", "1");
+    exe.defineCMacro("HAVE_SYS_STAT_H", "1");
+    exe.defineCMacro("HAVE_SYS_SYSMACROS_H", "1");
+    exe.defineCMacro("HAVE_SYS_TYPES_H", "1");
+    exe.defineCMacro("HAVE_UNISTD_H", "1");
+    exe.defineCMacro("NONSTD_PREAD_DEF", "CHANGE_XOPEN_SOURCE");
+    exe.defineCMacro("NONSTD_S_IFSOCK_DEF", "CHANGE_XOPEN_SOURCE");
+
+    exe.addCSourceFiles(.{
+        .files = &[_][]const u8{
+            prefix ++ "/squashfuse/fs.c",
+            prefix ++ "/squashfuse/table.c",
+            prefix ++ "/squashfuse/xattr.c",
+            prefix ++ "/squashfuse/cache.c",
+            prefix ++ "/squashfuse/dir.c",
+            prefix ++ "/squashfuse/file.c",
+            prefix ++ "/squashfuse/nonstd-makedev.c",
+            prefix ++ "/squashfuse/nonstd-pread.c",
+            prefix ++ "/squashfuse/nonstd-stat.c",
+            prefix ++ "/squashfuse/stat.c",
+            prefix ++ "/squashfuse/stack.c",
+            prefix ++ "/squashfuse/swap.c",
+        },
+    });
 
     exe.linkLibC();
 }

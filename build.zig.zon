@@ -1,11 +1,37 @@
 .{
 	.name = "squashfuse-zig",
-	.version = "0.0.39",
+	.version = "0.0.40",
 
-	// TODO: add deps
-//	.dependancies = .{
-//		.zstd = .{
-//			.url = https://github.com/facebook/zstd,
-//		},
-//	}
+    .paths = [][]const u8 {
+        "build.zig",
+        "build.zig.zon",
+        "lib",
+        "libfuse_config",
+        "lib.zig",
+        "squashfuse",
+        "test",
+    },
+
+    .dependencies = .{
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.7.0.tar.gz",
+            .hash = "1220f48518ce22882e102255ed3bcdb7aeeb4891f50b2cdd3bd74b5b2e24d3149ba2",
+        },
+        .libfuse = .{
+            .url = "https://github.com/libfuse/libfuse/archive/refs/tags/fuse-3.16.2.tar.gz",
+            .hash = "1220b0b0f90561934b7a6e6accffc49a6a0cd02b68595630c5df65b10718f9836927",
+        },
+        .libdeflate = .{
+            .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz",
+            .hash = "12209f6d3313777edb090add7dcb02c2ee7c10b65c62b9c401ce90148c0f44387d99",
+        },
+        .libzstd = .{
+            .url = "https://github.com/facebook/zstd/archive/refs/tags/v1.5.5.tar.gz",
+            .hash = "122080def5adee28587f8aaa31f0f33133897c9ed88f4ecda1c9eef649d29df5c568",
+        },
+        .liblz4 = .{
+            .url = "https://github.com/lz4/lz4/archive/refs/tags/v1.9.4.tar.gz",
+            .hash = "1220a9e5107eca3349d0574dc01d6c270884052bbaf397d54b8458f22d57aaef9979",
+        },
+    },
 }

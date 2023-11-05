@@ -15,11 +15,6 @@ jobs:
       run: |
         sudo apt update
         sudo apt install liblzo2-dev
-        git clone https://github.com/mgord9518/libfuse
-        git clone https://github.com/ebiggers/libdeflate
-        git clone https://github.com/facebook/zstd
-        git clone https://github.com/lz4/lz4
-        git clone https://github.com/Hejsil/zig-clap
 
     - name: Build (x86_64)
       run: |

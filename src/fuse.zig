@@ -2,7 +2,6 @@
 
 const std = @import("std");
 const os = std.os;
-const linux = os.linux;
 
 const c = @cImport({
     @cInclude("fuse.h");
@@ -53,7 +52,13 @@ pub const MountError = error{
     ReadOnly,
 };
 
-extern fn fuse_main_real(argc: c_int, argv: [*]const [*:0]const u8, op: *const LibFuseOperations, op_size: usize, private_data: *const anyopaque) c_int;
+extern fn fuse_main_real(
+    argc: c_int,
+    argv: [*]const [*:0]const u8,
+    op: *const LibFuseOperations,
+    op_size: usize,
+    private_data: *const anyopaque,
+) c_int;
 
 pub fn main(
     allocator: std.mem.Allocator,
@@ -73,14 +78,13 @@ pub fn main(
 
     const argc: c_int = @intCast(args.len);
 
-    const err = fuse_main_real(
+    try FuseErrorFromInt(fuse_main_real(
         argc,
         result.ptr,
         &libfuse_ops,
         @sizeOf(LibFuseOperations),
         &private_data,
-    );
-    try FuseErrorFromInt(err);
+    ));
 }
 
 // TODO: add all operations
@@ -92,7 +96,7 @@ fn genOps(
     // TODO: refactor
     if (@hasDecl(Operations, "readDir")) {
         ops.readdir = struct {
-            pub fn fuse_readdir(path: [*:0]const u8, fd: FillDir, off: linux.off_t, fi: *FileInfo, flags: ReadDirFlags) callconv(.C) E {
+            pub fn fuse_readdir(path: [*:0]const u8, fd: FillDir, off: os.off_t, fi: *FileInfo, flags: ReadDirFlags) callconv(.C) E {
                 const path_slice = std.mem.sliceTo(path, 0);
 
                 _ = off;
@@ -258,7 +262,7 @@ pub const StatVfs = c.struct_statvfs;
 
 pub const FillDir = packed struct {
     buf: *anyopaque,
-    internal: *const fn (*anyopaque, [*:0]const u8, ?*const os.Stat, linux.off_t, Flags) callconv(.C) c_int,
+    internal: *const fn (*anyopaque, [*:0]const u8, ?*const os.Stat, os.off_t, Flags) callconv(.C) c_int,
 
     pub const Flags = enum(c_int) {
         normal = 0,
@@ -320,20 +324,20 @@ pub const LockFlags = enum(c_int) {
 pub const LibFuseOperations = extern struct {
     getattr: ?*const fn ([*:0]const u8, *os.Stat, *FileInfo) callconv(.C) E = null,
     readlink: ?*const fn ([*:0]const u8, [*]u8, usize) callconv(.C) E = null,
-    mknod: ?*const fn ([*:0]const u8, linux.mode_t, linux.dev_t) callconv(.C) E = null,
-    mkdir: ?*const fn ([*:0]const u8, linux.mode_t) callconv(.C) E = null,
+    mknod: ?*const fn ([*:0]const u8, os.mode_t, os.dev_t) callconv(.C) E = null,
+    mkdir: ?*const fn ([*:0]const u8, os.mode_t) callconv(.C) E = null,
     unlink: ?*const fn ([*:0]const u8) callconv(.C) E = null,
     rmdir: ?*const fn ([*:0]const u8) callconv(.C) E = null,
     symlink: ?*const fn ([*:0]const u8, [*:0]const u8) callconv(.C) E = null,
     rename: ?*const fn ([*:0]const u8, [*:0]const u8, RenameFlags) callconv(.C) E = null,
     link: ?*const fn ([*:0]const u8, [*:0]const u8) callconv(.C) E = null,
-    chmod: ?*const fn ([*:0]const u8, linux.mode_t, *FileInfo) callconv(.C) E = null,
-    chown: ?*const fn ([*:0]const u8, linux.uid_t, linux.gid_t, *FileInfo) callconv(.C) E = null,
-    truncate: ?*const fn ([*:0]const u8, linux.off_t, *FileInfo) callconv(.C) E = null,
+    chmod: ?*const fn ([*:0]const u8, os.mode_t, *FileInfo) callconv(.C) E = null,
+    chown: ?*const fn ([*:0]const u8, os.uid_t, os.gid_t, *FileInfo) callconv(.C) E = null,
+    truncate: ?*const fn ([*:0]const u8, os.off_t, *FileInfo) callconv(.C) E = null,
     open: ?*const fn ([*:0]const u8, *FileInfo) callconv(.C) E = null,
-    read: ?*const fn ([*:0]const u8, [*]u8, usize, linux.off_t, *FileInfo) callconv(.C) c_int = null,
-    //read: ?*const fn ([*:0]const u8, []u8, linux.off_t, *FileInfo) c_int = null,
-    write: ?*const fn ([*:0]const u8, [*]const u8, usize, linux.off_t, *FileInfo) callconv(.C) c_int = null,
+    read: ?*const fn ([*:0]const u8, [*]u8, usize, os.off_t, *FileInfo) callconv(.C) c_int = null,
+    //read: ?*const fn ([*:0]const u8, []u8, os.off_t, *FileInfo) c_int = null,
+    write: ?*const fn ([*:0]const u8, [*]const u8, usize, os.off_t, *FileInfo) callconv(.C) c_int = null,
     statfs: ?*const fn ([*:0]const u8, *StatVfs) callconv(.C) E = null,
     flush: ?*const fn ([*:0]const u8, *FileInfo) callconv(.C) E = null,
     release: ?*const fn ([*:0]const u8, *FileInfo) callconv(.C) E = null,
@@ -345,7 +349,7 @@ pub const LibFuseOperations = extern struct {
 
     removexattr: ?*const fn ([*:0]const u8, [*:0]const u8) callconv(.C) E = null,
     opendir: ?*const fn ([*:0]const u8, *FileInfo) callconv(.C) E = null,
-    readdir: ?*const fn ([*:0]const u8, FillDir, linux.off_t, *FileInfo, ReadDirFlags) callconv(.C) E = null,
+    readdir: ?*const fn ([*:0]const u8, FillDir, os.off_t, *FileInfo, ReadDirFlags) callconv(.C) E = null,
 
     releasedir: ?*const fn ([*:0]const u8, *FileInfo) callconv(.C) E = null,
     fsyncdir: ?*const fn ([*:0]const u8, c_int, *FileInfo) callconv(.C) E = null,
@@ -353,19 +357,19 @@ pub const LibFuseOperations = extern struct {
     init: ?*const fn (*ConnectionInfo, *Config) callconv(.C) ?*anyopaque = null,
 
     destroy: ?*const fn (*anyopaque) callconv(.C) void = null,
-    create: ?*const fn ([*:0]const u8, linux.mode_t, *FileInfo) callconv(.C) E = null,
-    lock: ?*const fn ([*:0]const u8, *FileInfo, LockFlags, *linux.Flock) callconv(.C) c_int = null,
-    utimens: ?*const fn ([*:0]const u8, *const [2]linux.timespec, *FileInfo) callconv(.C) c_int = null,
+    create: ?*const fn ([*:0]const u8, os.mode_t, *FileInfo) callconv(.C) E = null,
+    lock: ?*const fn ([*:0]const u8, *FileInfo, LockFlags, *os.Flock) callconv(.C) c_int = null,
+    utimens: ?*const fn ([*:0]const u8, *const [2]os.timespec, *FileInfo) callconv(.C) c_int = null,
     bmap: ?*const fn ([*:0]const u8, usize, *u64) callconv(.C) c_int = null,
 
     ioctl: ?*const fn ([*:0]const u8, c_int, *anyopaque, *FileInfo, c_uint, *anyopaque) callconv(.C) c_int = null,
     poll: ?*const fn ([*:0]const u8, *FileInfo, *PollHandle, *c_uint) callconv(.C) c_int = null,
-    write_buf: ?*const fn ([*:0]const u8, *BufVec, linux.off_t, *FileInfo) callconv(.C) c_int = null,
-    read_buf: ?*const fn ([*:0]const u8, [*c][*c]BufVec, usize, linux.off_t, *FileInfo) callconv(.C) c_int = null,
+    write_buf: ?*const fn ([*:0]const u8, *BufVec, os.off_t, *FileInfo) callconv(.C) c_int = null,
+    read_buf: ?*const fn ([*:0]const u8, [*c][*c]BufVec, usize, os.off_t, *FileInfo) callconv(.C) c_int = null,
     flock: ?*const fn ([*:0]const u8, *FileInfo, c_int) callconv(.C) c_int = null,
-    fallocate: ?*const fn ([*:0]const u8, c_int, linux.off_t, linux.off_t, *FileInfo) callconv(.C) c_int = null,
-    copy_file_range: ?*const fn ([*:0]const u8, *FileInfo, linux.off_t, [*:0]const u8, *FileInfo, linux.off_t, usize, c_int) callconv(.C) isize = null,
-    lseek: ?*const fn ([*:0]const u8, linux.off_t, c_int, *FileInfo) callconv(.C) linux.off_t = null,
+    fallocate: ?*const fn ([*:0]const u8, c_int, os.off_t, os.off_t, *FileInfo) callconv(.C) c_int = null,
+    copy_file_range: ?*const fn ([*:0]const u8, *FileInfo, os.off_t, [*:0]const u8, *FileInfo, os.off_t, usize, c_int) callconv(.C) isize = null,
+    lseek: ?*const fn ([*:0]const u8, os.off_t, c_int, *FileInfo) callconv(.C) os.off_t = null,
 };
 
 // FUSE uses negated values of system errno

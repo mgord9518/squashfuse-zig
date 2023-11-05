@@ -2,8 +2,6 @@ const std = @import("std");
 const fmt = std.fmt;
 const fuse = @import("fuse.zig");
 const clap = @import("clap");
-const E = fuse.E;
-const linux = std.os.linux;
 
 const SquashFs = @import("squashfuse").SquashFs;
 
@@ -16,7 +14,7 @@ const Squash = struct {
 const version = std.SemanticVersion{
     .major = 0,
     .minor = 0,
-    .patch = 38,
+    .patch = 40,
 };
 
 pub fn main() !void {
@@ -365,7 +363,7 @@ const FuseOperations = struct {
         _ = buf;
     }
 
-    pub fn getAttr(path: [:0]const u8, _: *fuse.FileInfo) fuse.MountError!std.os.linux.Stat {
+    pub fn getAttr(path: [:0]const u8, _: *fuse.FileInfo) fuse.MountError!std.os.Stat {
         var squash = fuse.privateDataAs(Squash);
 
         // Load from the root inode
