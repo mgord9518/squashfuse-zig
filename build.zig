@@ -64,8 +64,8 @@ pub fn build(b: *std.build.Builder) !void {
     const enable_lzo = b.option(
         bool,
         "enable-lzo",
-        "enable lzo decompression (default: false)",
-    ) orelse false;
+        "enable lzo decompression (default: true)",
+    ) orelse true;
 
     const build_squashfuse = b.option(
         bool,
@@ -121,31 +121,6 @@ pub fn build(b: *std.build.Builder) !void {
         exe.target = target;
         exe.optimize = optimize;
 
-        const clap_dep = exe.step.owner.dependency("clap", .{
-            .target = exe.target,
-            .optimize = exe.optimize,
-        });
-
-        const clap_module = b.addModule("clap", .{
-            .source_file = clap_dep.path("clap.zig"),
-        });
-
-        link(exe, .{
-            .enable_lz4 = enable_lz4,
-            .enable_lzo = enable_lzo,
-            .enable_zlib = enable_zlib,
-            .enable_zstd = enable_zstd,
-            .enable_xz = enable_xz,
-
-            .enable_fuse = std.mem.eql(u8, exe.name, "squashfuse"),
-            .use_system_fuse = use_system_fuse,
-
-            .use_libdeflate = use_libdeflate,
-        });
-
-        exe.addModule("squashfuse", squashfuse_module);
-        exe.addModule("clap", clap_module);
-
         if (std.mem.eql(u8, exe.name, "squashfuse")) {
 
             // TODO: FIX
@@ -167,6 +142,42 @@ pub fn build(b: *std.build.Builder) !void {
                 continue;
             }
         }
+
+        const clap_dep = b.dependency("clap", .{
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const fuse_dep = b.dependency("fuse", .{
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const fuse_module = b.addModule(
+            "fuse",
+            .{ .source_file = fuse_dep.module("fuse").source_file },
+        );
+
+        const clap_module = b.addModule("clap", .{
+            .source_file = clap_dep.path("clap.zig"),
+        });
+
+        link(exe, .{
+            .enable_lz4 = enable_lz4,
+            .enable_lzo = enable_lzo,
+            .enable_zlib = enable_zlib,
+            .enable_zstd = enable_zstd,
+            .enable_xz = enable_xz,
+
+            .enable_fuse = std.mem.eql(u8, exe.name, "squashfuse"),
+            .use_system_fuse = use_system_fuse,
+
+            .use_libdeflate = use_libdeflate,
+        });
+
+        exe.addModule("squashfuse", squashfuse_module);
+        exe.addModule("fuse", fuse_module);
+        exe.addModule("clap", clap_module);
 
         b.installArtifact(exe);
     }
@@ -196,8 +207,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     link(unit_tests, .{
         .enable_lz4 = true,
-        // TODO: add LZO
-        .enable_lzo = false,
+        .enable_lzo = true,
         .enable_zlib = true,
         .enable_zstd = true,
         .enable_xz = true,
@@ -235,10 +245,6 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(&run_unit_tests.step);
 }
 
-pub inline fn thisDir() []const u8 {
-    return comptime std.fs.path.dirname(@src().file) orelse unreachable;
-}
-
 pub const LinkOptions = struct {
     enable_zstd: bool,
     enable_lz4: bool,
@@ -254,8 +260,6 @@ pub const LinkOptions = struct {
 };
 
 pub fn module(b: *std.Build, opts: LinkOptions) *std.Build.Module {
-    const prefix = thisDir();
-
     const lib_options = b.addOptions();
     lib_options.addOption(bool, "enable_xz", opts.enable_xz);
     lib_options.addOption(bool, "enable_zlib", opts.enable_zlib);
@@ -266,7 +270,7 @@ pub fn module(b: *std.Build, opts: LinkOptions) *std.Build.Module {
     //    lib_options.addOption(bool, "use_zig_zstd", opts.use_zig_zstd);
 
     return b.createModule(.{
-        .source_file = .{ .path = prefix ++ "/lib.zig" },
+        .source_file = .{ .path = b.pathFromRoot("lib.zig") },
         .dependencies = &.{
             .{
                 .name = "build_options",
@@ -277,19 +281,9 @@ pub fn module(b: *std.Build, opts: LinkOptions) *std.Build.Module {
 }
 
 pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
-    const prefix = thisDir();
+    const b = exe.step.owner;
 
     if (opts.enable_fuse) {
-        // The directory must be surrounded by quotes so that the C
-        // preprocessor will substitute it as a string literal
-        const quoted_fusermount_dir = std.fmt.allocPrint(
-            exe.step.owner.allocator,
-            "\"{s}\"",
-            .{opts.fusermount_dir},
-        ) catch {
-            @panic("OOM");
-        };
-
         if (opts.use_system_fuse) {
             exe.linkSystemLibrary("fuse3");
         } else {
@@ -298,72 +292,15 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
                 .optimize = exe.optimize,
             });
 
+            const fuse_dep = exe.step.owner.dependency("fuse", .{
+                .target = exe.target,
+                .optimize = exe.optimize,
+            });
+
             exe.addIncludePath(libfuse_dep.path("include"));
-            exe.addIncludePath(.{ .path = prefix ++ "/libfuse_config" });
+            exe.addIncludePath(fuse_dep.path("libfuse_config"));
 
-            // TODO: configurable build opts
-            exe.defineCMacro("FUSERMOUNT_DIR", quoted_fusermount_dir);
-            exe.defineCMacro("_REENTRANT", null);
-            exe.defineCMacro("HAVE_LIBFUSE_PRIVATE_CONFIG_H", null);
-            exe.defineCMacro("_FILE_OFFSET_BITS", "64");
-            exe.defineCMacro("FUSE_USE_VERSION", "312");
-
-            exe.defineCMacro("HAVE_COPY_FILE_RANGE", null);
-            exe.defineCMacro("HAVE_FALLOCATE", null);
-            exe.defineCMacro("HAVE_FDATASYNC", null);
-            exe.defineCMacro("HAVE_FORK", null);
-            exe.defineCMacro("HAVE_FSTATAT", null);
-            exe.defineCMacro("HAVE_ICONV", null);
-            exe.defineCMacro("HAVE_OPENAT", null);
-            exe.defineCMacro("HAVE_PIPE2", null);
-            exe.defineCMacro("HAVE_POSIX_FALLOCATE", null);
-            exe.defineCMacro("HAVE_READLINKAT", null);
-            exe.defineCMacro("HAVE_SETXATTR", null);
-            exe.defineCMacro("HAVE_SPLICE", null);
-            exe.defineCMacro("HAVE_STRUCT_ST_STAT_ST_ATIM", null);
-            exe.defineCMacro("HAVE_UTIMENSAT", null);
-            exe.defineCMacro("HAVE_VMSPLICE", null);
-            exe.defineCMacro("PACKAGE_VERSION", "\"3.14.1\"");
-
-            exe.defineCMacro("LIBFUSE_BUILT_WITH_VERSIONED_SYMBOLS", "1");
-
-            const c_files = &[_][]const u8{
-                "lib/fuse_loop.c",
-                "lib/fuse_lowlevel.c",
-                "lib/fuse_opt.c",
-                "lib/fuse_signals.c",
-                "lib/buffer.c",
-                "lib/compat.c",
-                "lib/fuse.c",
-                "lib/fuse_log.c",
-                "lib/fuse_loop_mt.c",
-                "lib/mount.c",
-                "lib/mount_util.c",
-                "lib/modules/iconv.c",
-                "lib/modules/subdir.c",
-                "lib/helper.c",
-                "lib/cuse_lowlevel.c",
-            };
-
-            for (c_files) |c_file| {
-                exe.addCSourceFile(.{
-                    .file = libfuse_dep.path(c_file),
-                    .flags = &[_][]const u8{
-                        "-Wall",
-                        "-Winvalid-pch",
-                        "-Wextra",
-                        "-Wno-sign-compare",
-                        "-Wstrict-prototypes",
-                        "-Wmissing-declarations",
-                        "-Wwrite-strings",
-                        "-Wno-strict-aliasing",
-                        "-Wno-unused-result",
-                        "-Wint-conversion",
-
-                        "-fPIC",
-                    },
-                });
-            }
+            exe.linkLibrary(fuse_dep.artifact("fuse"));
         }
     }
 
@@ -427,9 +364,18 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         });
     }
 
-    // TODO: vendor LZO
     if (opts.enable_lzo) {
-        exe.linkSystemLibrary("lzo2");
+        const liblzo_dep = exe.step.owner.dependency("libminilzo", .{
+            .target = exe.target,
+            .optimize = exe.optimize,
+        });
+
+        exe.addIncludePath(liblzo_dep.path("."));
+
+        exe.addCSourceFile(.{
+            .file = liblzo_dep.path("minilzo.c"),
+            .flags = &[_][]const u8{},
+        });
     }
 
     if (opts.enable_zstd) {
@@ -474,23 +420,18 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
     const os_tag = exe.target.os_tag orelse builtin.os.tag;
 
     // Add squashfuse source files
-    exe.addIncludePath(.{ .path = prefix ++ "/squashfuse" });
+    exe.addIncludePath(.{ .path = b.pathFromRoot("squashfuse") });
 
+    // TODO: Support other OSes besides Linux
     switch (os_tag) {
         .linux => {
             exe.defineCMacro("HAVE_LINUX_TYPES_LE16", "1");
         },
         .windows => {
-            exe.addIncludePath(.{ .path = prefix ++ "/squashfuse/win" });
+            exe.addIncludePath(.{ .path = b.pathFromRoot("squashfuse/win") });
         },
         else => {},
     }
-
-    if (opts.enable_lz4) exe.defineCMacro("HAVE_LZ4_H", "1");
-    if (opts.enable_lz4) exe.defineCMacro("HAVE_LZO_LZO1X_H", "1");
-    if (opts.enable_xz) exe.defineCMacro("HAVE_LZMA_H", "1");
-    if (opts.enable_zlib) exe.defineCMacro("HAVE_ZLIB_H", "1");
-    if (opts.enable_zstd) exe.defineCMacro("HAVE_ZSTD_H", "1");
 
     exe.defineCMacro("HAVE_ASM_BYTEORDER", "1");
     exe.defineCMacro("HAVE_DECL_FUSE_ADD_DIRENTRY", "1");
@@ -513,18 +454,18 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
 
     exe.addCSourceFiles(.{
         .files = &[_][]const u8{
-            prefix ++ "/squashfuse/fs.c",
-            prefix ++ "/squashfuse/table.c",
-            prefix ++ "/squashfuse/xattr.c",
-            prefix ++ "/squashfuse/cache.c",
-            prefix ++ "/squashfuse/dir.c",
-            prefix ++ "/squashfuse/file.c",
-            prefix ++ "/squashfuse/nonstd-makedev.c",
-            prefix ++ "/squashfuse/nonstd-pread.c",
-            prefix ++ "/squashfuse/nonstd-stat.c",
-            prefix ++ "/squashfuse/stat.c",
-            prefix ++ "/squashfuse/stack.c",
-            prefix ++ "/squashfuse/swap.c",
+            b.pathFromRoot("squashfuse/fs.c"),
+            b.pathFromRoot("squashfuse/table.c"),
+            b.pathFromRoot("squashfuse/xattr.c"),
+            b.pathFromRoot("squashfuse/cache.c"),
+            b.pathFromRoot("squashfuse/dir.c"),
+            b.pathFromRoot("squashfuse/file.c"),
+            b.pathFromRoot("squashfuse/nonstd-makedev.c"),
+            b.pathFromRoot("squashfuse/nonstd-pread.c"),
+            b.pathFromRoot("squashfuse/nonstd-stat.c"),
+            b.pathFromRoot("squashfuse/stat.c"),
+            b.pathFromRoot("squashfuse/stack.c"),
+            b.pathFromRoot("squashfuse/swap.c"),
         },
     });
 

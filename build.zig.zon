@@ -1,12 +1,11 @@
 .{
-	.name = "squashfuse-zig",
-	.version = "0.0.40",
+    .name = "squashfuse-zig",
+    .version = "0.0.41",
 
     .paths = [][]const u8 {
         "build.zig",
         "build.zig.zon",
         "lib",
-        "libfuse_config",
         "lib.zig",
         "squashfuse",
         "test",
@@ -21,6 +20,10 @@
             .url = "https://github.com/libfuse/libfuse/archive/refs/tags/fuse-3.16.2.tar.gz",
             .hash = "1220b0b0f90561934b7a6e6accffc49a6a0cd02b68595630c5df65b10718f9836927",
         },
+        .fuse = .{
+            .url = "https://github.com/mgord9518/libfuse-zig/archive/refs/tags/continuous.tar.gz",
+            .hash = "12201893a5c1ff705fb979a2a2568019f65fa47615d15c08395ad180d1a7e6815fcc",
+        },
         .libdeflate = .{
             .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz",
             .hash = "12209f6d3313777edb090add7dcb02c2ee7c10b65c62b9c401ce90148c0f44387d99",
@@ -32,6 +35,10 @@
         .liblz4 = .{
             .url = "https://github.com/lz4/lz4/archive/refs/tags/v1.9.4.tar.gz",
             .hash = "1220a9e5107eca3349d0574dc01d6c270884052bbaf397d54b8458f22d57aaef9979",
+        },
+        .libminilzo = .{
+            .url = "https://www.oberhumer.com/opensource/lzo/download/minilzo-2.10.tar.gz",
+            .hash = "1220a8ab36e23c4b6605c03ff7d625b6df9d484d861c02768b7461446812a3e5918f",
         },
     },
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const fmt = std.fmt;
-const fuse = @import("fuse.zig");
+
+const fuse = @import("fuse");
 const clap = @import("clap");
 
 const SquashFs = @import("squashfuse").SquashFs;
@@ -231,7 +232,7 @@ pub fn main() !void {
     }
 
     // TODO: nicer error printing
-    try fuse.main(
+    try fuse.run(
         allocator,
         args.items,
         FuseOperations,
