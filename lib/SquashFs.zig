@@ -658,21 +658,17 @@ usingnamespace if (build_options.enable_lzo)
             @cInclude("minilzo.h");
         });
         export fn zig_lzo_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-            var lzo_out: clzo.lzo_uint = undefined;
-
             const err = clzo.lzo1x_decompress_safe(
                 in,
                 @intCast(in_size),
                 out,
-                &lzo_out,
+                @ptrCast(out_size),
                 null,
             );
 
             if (err != clzo.LZO_E_OK) {
                 return c.SQFS_ERR;
             }
-
-            out_size.* = @intCast(lzo_out);
 
             return c.SQFS_OK;
         }

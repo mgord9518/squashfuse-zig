@@ -2,10 +2,7 @@
 // algos
 
 const std = @import("std");
-const os = std.os;
-const span = std.mem.span;
 const expect = std.testing.expect;
-const fs = std.fs;
 const squashfuse = @import("squashfuse");
 
 pub const SquashFsError = squashfuse.SquashFsError;
