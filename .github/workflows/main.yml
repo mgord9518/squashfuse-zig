@@ -11,11 +11,6 @@ jobs:
     - uses: actions/checkout@v2
     - uses: goto-bus-stop/setup-zig@v2
 
-    - name: Install deps
-      run: |
-        sudo apt update
-        sudo apt install liblzo2-dev
-
     - name: Build (x86_64)
       run: |
         # All compression algos
@@ -37,6 +32,11 @@ jobs:
         zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=true -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
         mv zig-out/bin/squashfuse squashfuse_lz4.x86_64
+
+        # LZO
+        zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=false -Denable-lzo=true -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_lzo.x86_64
         
         # XZ
         zig build -Doptimize=ReleaseFast -Dcpu=x86_64 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=true -Denable-lzo=false -Duse-system-fuse=false
