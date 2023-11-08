@@ -1,5 +1,5 @@
 // Tests basic functionality (walking, reading) for all compression
-// algos (besides LZO, which I still need to add support for)
+// algos
 
 const std = @import("std");
 const os = std.os;
@@ -55,6 +55,12 @@ test "walk tree" {
 
     {
         var sqfs = try SquashFs.init(allocator, "test/tree_lz4.sqfs", .{});
+        defer sqfs.deinit();
+        try testWalk(allocator, &sqfs);
+    }
+
+    {
+        var sqfs = try SquashFs.init(allocator, "test/tree_lzo.sqfs", .{});
         defer sqfs.deinit();
         try testWalk(allocator, &sqfs);
     }
@@ -134,6 +140,12 @@ test "read" {
 
     {
         var sqfs = try SquashFs.init(allocator, "test/tree_lz4.sqfs", .{});
+        defer sqfs.deinit();
+        try testRead(allocator, &sqfs);
+    }
+
+    {
+        var sqfs = try SquashFs.init(allocator, "test/tree_lzo.sqfs", .{});
         defer sqfs.deinit();
         try testRead(allocator, &sqfs);
     }

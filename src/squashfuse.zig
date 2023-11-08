@@ -15,7 +15,7 @@ const Squash = struct {
 const version = std.SemanticVersion{
     .major = 0,
     .minor = 0,
-    .patch = 40,
+    .patch = 41,
 };
 
 pub fn main() !void {
