@@ -220,7 +220,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_options.addOption(bool, "enable_xz", true);
     test_options.addOption(bool, "enable_zlib", true);
     test_options.addOption(bool, "use_libdeflate", true);
-    test_options.addOption(bool, "enable_lzo", false);
+    test_options.addOption(bool, "enable_lzo", true);
     test_options.addOption(bool, "enable_lz4", true);
     test_options.addOption(bool, "enable_zstd", true);
     test_options.addOption(bool, "use_zig_zstd", true);
