@@ -102,6 +102,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "enable_lz4", enable_lz4);
     exe_options.addOption(bool, "enable_zstd", enable_zstd);
     exe_options.addOption(bool, "use_zig_zstd", use_zig_zstd);
+    exe_options.addOption(bool, "use_zig_xz", true);
 
     const squashfuse_module = b.addModule("squashfuse", .{
         .source_file = .{
@@ -115,33 +116,9 @@ pub fn build(b: *std.build.Builder) !void {
         },
     });
 
-    const abi = target.getAbi();
-
     for (executable_list.items) |exe| {
         exe.target = target;
         exe.optimize = optimize;
-
-        if (std.mem.eql(u8, exe.name, "squashfuse")) {
-
-            // TODO: FIX
-            // This check used to work, maybe another dep besides libfuse now
-            // requires timspec? Needs investigation
-            // Cannot currently build with FUSE when using musl, so sadly the
-            // main program must be skipped with musl ABI
-            if (abi == .musl) {
-                std.debug.print("Main squashfuse tool not yet supported for MUSL libc\n", .{});
-                std.debug.print("This is due to Zig not yet supporting C bitfields and\n", .{});
-                std.debug.print("MUSL uses bitfields for the timespec implementation...\n", .{});
-                std.debug.print("which is used by libFUSE.\n\n", .{});
-                std.debug.print("Unfortunately, this means mounting cannot currently be\n", .{});
-                std.debug.print("done with these bindings under MUSL unless I can find another good\n", .{});
-                std.debug.print("FUSE library written in C, C++ or ideally, Zig that somehow doesn't use timespec\n", .{});
-                std.debug.print("Until then, we'll have to deal with no static executables\n\n", .{});
-                std.debug.print("All tools that do not require mounting will still be built\n", .{});
-
-                continue;
-            }
-        }
 
         const clap_dep = b.dependency("clap", .{
             .target = target,
@@ -223,7 +200,8 @@ pub fn build(b: *std.build.Builder) !void {
     test_options.addOption(bool, "enable_lzo", true);
     test_options.addOption(bool, "enable_lz4", true);
     test_options.addOption(bool, "enable_zstd", true);
-    test_options.addOption(bool, "use_zig_zstd", true);
+    test_options.addOption(bool, "use_zig_zstd", false);
+    test_options.addOption(bool, "use_zig_xz", true);
 
     const squashfuse_test_module = b.addModule("squashfuse", .{
         .source_file = .{
@@ -252,6 +230,8 @@ pub const LinkOptions = struct {
     enable_zlib: bool,
     enable_xz: bool,
     enable_fuse: bool = false,
+
+    use_zig_xz: bool = true,
 
     use_system_fuse: bool = false,
     use_libdeflate: bool = true,
@@ -287,18 +267,10 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         if (opts.use_system_fuse) {
             exe.linkSystemLibrary("fuse3");
         } else {
-            const libfuse_dep = exe.step.owner.dependency("libfuse", .{
-                .target = exe.target,
-                .optimize = exe.optimize,
-            });
-
             const fuse_dep = exe.step.owner.dependency("fuse", .{
                 .target = exe.target,
                 .optimize = exe.optimize,
             });
-
-            exe.addIncludePath(libfuse_dep.path("include"));
-            exe.addIncludePath(fuse_dep.path("libfuse_config"));
 
             exe.linkLibrary(fuse_dep.artifact("fuse"));
         }
@@ -377,6 +349,44 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             .flags = &[_][]const u8{},
         });
     }
+
+    // TODO: vendor XZ correctly
+    //    if (opts.enable_xz and !opts.use_zig_xz) {
+    //        const libxz_dep = exe.step.owner.dependency("libxz", .{
+    //            .target = exe.target,
+    //            .optimize = exe.optimize,
+    //        });
+    //
+    //        exe.addIncludePath(libxz_dep.path("src/liblzma/api"));
+    //        exe.addIncludePath(libxz_dep.path("src/liblzma/lz"));
+    //        exe.addIncludePath(libxz_dep.path("src/common"));
+    //        exe.addIncludePath(libxz_dep.path("src/liblzma/common"));
+    //        exe.addIncludePath(libxz_dep.path("src/liblzma/check"));
+    //
+    //        exe.defineCMacro("HAVE_STDBOOL_H", "1");
+    //
+    //        const c_files = &[_][]const u8{
+    //            "src/liblzma/lzma/lzma2_decoder.c",
+    //            "src/liblzma/lz/lz_decoder.c",
+    //
+    //            "src/liblzma/common/stream_buffer_decoder.c",
+    //            "src/liblzma/common/stream_decoder.c",
+    //            "src/liblzma/common/common.c",
+    //            "src/liblzma/common/index_hash.c",
+    //            "src/liblzma/common/stream_flags_common.c",
+    //            "src/liblzma/check/crc32_fast.c",
+    //            "src/liblzma/check/crc32_small.c",
+    //            "src/liblzma/check/check.c",
+    //            "src/liblzma/common/block_decoder.c",
+    //        };
+    //
+    //        for (c_files) |c_file| {
+    //            exe.addCSourceFile(.{
+    //                .file = libxz_dep.path(c_file),
+    //                .flags = &[_][]const u8{},
+    //            });
+    //        }
+    //    }
 
     if (opts.enable_zstd) {
         const libzstd_dep = exe.step.owner.dependency("libzstd", .{

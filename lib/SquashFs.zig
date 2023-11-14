@@ -7,8 +7,6 @@ const zstd = std.compress.zstd;
 const build_options = @import("build_options");
 
 const c = @cImport({
-    @cInclude("sys/stat.h");
-    @cInclude("stat.h"); // squashfuse (not system) stat header
     @cInclude("squashfuse.h");
     @cInclude("common.h");
 });
@@ -240,11 +238,13 @@ pub const SquashFs = struct {
             return fs.File.Stat.fromSystem(st);
         }
 
+        extern fn sqfs_stat(*c.sqfs, *c.sqfs_inode, *os.Stat) c.sqfs_err;
+
         // Like `Inode.stat` but returns the OS native stat format
         pub fn statC(self: *Inode) !os.Stat {
             var st = std.mem.zeroes(os.Stat);
 
-            try SquashFsErrorFromInt(c.sqfs_stat(
+            try SquashFsErrorFromInt(sqfs_stat(
                 &self.parent.internal,
                 &self.internal,
                 @ptrCast(&st),
@@ -572,43 +572,79 @@ export fn sqfs_decompressor_get(kind: SquashFs.Compression) ?*const fn ([*]u8, u
 // Define C symbols for compression algos
 // TODO: add more Zig-implemented algos if they're performant
 usingnamespace if (build_options.enable_xz)
-    struct {
-        export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-            var stream = io.fixedBufferStream(in[0..in_size]);
+    if (build_options.use_zig_xz)
+        struct {
+            export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+                var stream = io.fixedBufferStream(in[0..in_size]);
 
-            var allocator = std.heap.c_allocator;
+                var allocator = std.heap.c_allocator;
 
-            var decompressor = xz.decompress(
-                allocator,
-                stream.reader(),
-            ) catch return 1;
+                var decompressor = xz.decompress(
+                    allocator,
+                    stream.reader(),
+                ) catch return c.SQFS_ERR;
 
-            defer decompressor.deinit();
+                defer decompressor.deinit();
 
-            var buf = out[0..out_size.*];
+                var buf = out[0..out_size.*];
 
-            out_size.* = decompressor.read(buf) catch return 2;
+                out_size.* = decompressor.read(buf) catch return c.SQFS_ERR;
 
-            return 0;
+                return c.SQFS_OK;
+            }
         }
-    }
+    else
+        struct {}
+    //    else
+    //        struct {
+    //            const xz_c = @cImport({
+    //                @cInclude("lzma.h");
+    //            });
+    //
+    //            export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+    //                var memlimit: u64 = 0xffff_ffff_ffff_ffff;
+    //
+    //                var inpos: usize = 0;
+    //                var outpos: usize = 0;
+    //
+    //                var err = xz_c.lzma_stream_buffer_decode(
+    //                    &memlimit,
+    //                    0,
+    //                    null,
+    //                    in,
+    //                    &inpos,
+    //                    in_size,
+    //                    out,
+    //                    &outpos,
+    //                    out_size.*,
+    //                );
+    //
+    //                out_size.* = outpos;
+    //
+    //                if (err != xz_c.LZMA_OK) {
+    //                    return c.SQFS_ERR;
+    //                }
+    //
+    //                return 0;
+    //            }
+    //        }
 else
     struct {};
 
 usingnamespace if (build_options.enable_zlib)
     struct {
-        const ldef = @cImport({
+        const deflate_c = @cImport({
             @cInclude("libdeflate.h");
         });
 
-        var ldef_decompressor: ?*ldef.libdeflate_decompressor = null;
+        var ldef_decompressor: ?*deflate_c.libdeflate_decompressor = null;
 
         export fn zig_zlib_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
             if (ldef_decompressor == null) {
-                ldef_decompressor = ldef.libdeflate_alloc_decompressor();
+                ldef_decompressor = deflate_c.libdeflate_alloc_decompressor();
             }
 
-            const err = ldef.libdeflate_zlib_decompress(
+            const err = deflate_c.libdeflate_zlib_decompress(
                 ldef_decompressor,
                 in,
                 in_size,
@@ -617,7 +653,7 @@ usingnamespace if (build_options.enable_zlib)
                 out_size,
             );
 
-            if (err != ldef.LIBDEFLATE_SUCCESS) {
+            if (err != deflate_c.LIBDEFLATE_SUCCESS) {
                 return c.SQFS_ERR;
             }
 
@@ -629,22 +665,22 @@ else
 
 usingnamespace if (build_options.enable_lz4)
     struct {
-        const lz = @cImport({
+        const lz4_c = @cImport({
             @cInclude("lz4.h");
         });
         export fn zig_lz4_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-            const err = lz.LZ4_decompress_safe(
+            const ret = lz4_c.LZ4_decompress_safe(
                 in,
                 out,
                 @intCast(in_size),
                 @intCast(out_size.*),
             );
 
-            if (err < 0) {
+            if (ret < 0) {
                 return c.SQFS_ERR;
             }
 
-            out_size.* = @intCast(err);
+            out_size.* = @intCast(ret);
 
             return c.SQFS_OK;
         }
@@ -654,11 +690,11 @@ else
 
 usingnamespace if (build_options.enable_lzo)
     struct {
-        const clzo = @cImport({
+        const lzo_c = @cImport({
             @cInclude("minilzo.h");
         });
         export fn zig_lzo_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-            const err = clzo.lzo1x_decompress_safe(
+            const err = lzo_c.lzo1x_decompress_safe(
                 in,
                 @intCast(in_size),
                 out,
@@ -666,7 +702,7 @@ usingnamespace if (build_options.enable_lzo)
                 null,
             );
 
-            if (err != clzo.LZO_E_OK) {
+            if (err != lzo_c.LZO_E_OK) {
                 return c.SQFS_ERR;
             }
 
@@ -700,22 +736,22 @@ usingnamespace if (build_options.enable_zstd)
         }
     else
         struct {
-            const czstd = @cImport({
+            const zstd_c = @cImport({
                 @cInclude("zstd.h");
             });
             export fn zig_zstd_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-                const err = czstd.ZSTD_decompress(
+                const ret = zstd_c.ZSTD_decompress(
                     out,
                     out_size.*,
                     in,
                     in_size,
                 );
 
-                if (czstd.ZSTD_isError(err) != 0) {
+                if (zstd_c.ZSTD_isError(ret) != 0) {
                     return c.SQFS_ERR;
                 }
 
-                out_size.* = err;
+                out_size.* = ret;
 
                 return c.SQFS_OK;
             }

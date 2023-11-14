@@ -7,43 +7,18 @@ const clap = @import("clap");
 
 const SquashFs = @import("squashfuse").SquashFs;
 
-const Version = struct {
-    prefix: ?[]const u8 = null,
-
-    major: u8,
-    minor: u8,
-    patch: u8,
-
-    pub fn string(self: *const Version, buf: []u8) []const u8 {
-        if (self.prefix) |prefix| {
-            return fmt.bufPrint(buf, "{s}-{d}.{d}.{d}", .{
-                prefix,
-                self.major,
-                self.minor,
-                self.patch,
-            }) catch unreachable;
-        }
-
-        return fmt.bufPrint(buf, "{d}.{d}.{d}", .{
-            self.major,
-            self.minor,
-            self.patch,
-        }) catch unreachable;
-    }
-};
-
 // TODO: import from build.zig.zon
-const version = Version{
+const version = std.SemanticVersion{
     .major = 0,
     .minor = 0,
-    .patch = 41,
+    .patch = 43,
 };
 
 pub fn main() !void {
     var allocator = std.heap.c_allocator;
 
-    var stderr = std.io.getStdErr().writer();
-    var stdout = std.io.getStdOut().writer();
+    var stderr = io.getStdErr().writer();
+    var stdout = io.getStdOut().writer();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help            display this help and exit
@@ -103,10 +78,12 @@ pub fn main() !void {
         }
 
         if (res.args.version != 0) {
-            var buf: [32]u8 = undefined;
-            const ver_str = version.string(&buf);
+            try stderr.print("{d}.{d}.{d}\n", .{
+                version.major,
+                version.minor,
+                version.patch,
+            });
 
-            try stderr.print("{s}\n", .{ver_str});
             return;
         }
 
@@ -222,7 +199,7 @@ fn extractArchive(
     dest: []const u8,
     opts: ExtractArchiveOptions,
 ) !void {
-    var stdout = std.io.getStdOut().writer();
+    var stdout = io.getStdOut().writer();
 
     var root_inode = sqfs.getRootInode();
 
@@ -236,7 +213,7 @@ fn extractArchive(
     // Iterate over the SquashFS image and extract each item
     while (try walker.next()) |entry| {
         var path_buf: [std.os.PATH_MAX]u8 = undefined;
-        const prefixed_dest = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{
+        const prefixed_dest = try fmt.bufPrint(&path_buf, "{s}/{s}", .{
             dest,
             entry.path,
         });
