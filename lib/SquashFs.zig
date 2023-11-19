@@ -468,7 +468,7 @@ pub const SquashFs = struct {
                     defer f.close();
 
                     var off: usize = 0;
-                    const fsize: usize = self.internal.xtra.reg.file_size;
+                    const fsize: u64 = self.internal.xtra.reg.file_size;
 
                     while (off < fsize) {
                         const read_bytes = try self.read(buf);
