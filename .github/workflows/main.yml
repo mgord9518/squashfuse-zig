@@ -6,49 +6,86 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - uses: goto-bus-stop/setup-zig@v2
 
-    - name: Build (x86_64)
+    - name: Build (Musl libc, static, x86_64)
       run: |
         # All compression algos
-        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=true -Duse-libdeflate=true -Denable-zstd=true -Denable-lz4=true -Denable-xz=true -Denable-lzo=false -Duse-system-fuse=false
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=true -Duse-libdeflate=true -Denable-zstd=true -Denable-lz4=true -Denable-xz=true -Denable-lzo=true -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
-        mv zig-out/bin/squashfuse squashfuse.x86_64
+        mv zig-out/bin/squashfuse squashfuse.static.x86_64
 
         # ZLIB
         zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=true -Duse-libdeflate=true -Denable-zstd=false -Denable-lz4=false -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
-        mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
+        mv zig-out/bin/squashfuse squashfuse_zlib.static.x86_64
 
         # ZSTD
         zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=false -Denable-zstd=true -Denable-lz4=false -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
-        mv zig-out/bin/squashfuse squashfuse_zstd.x86_64
+        mv zig-out/bin/squashfuse squashfuse_zstd.static.x86_64
 
         # LZ4
         zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=false -Denable-zstd=false -Denable-lz4=true -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
-        mv zig-out/bin/squashfuse squashfuse_lz4.x86_64
+        mv zig-out/bin/squashfuse squashfuse_lz4.static.x86_64
 
         # LZO
         zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=false -Denable-lzo=true -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
-        mv zig-out/bin/squashfuse squashfuse_lzo.x86_64
+        mv zig-out/bin/squashfuse squashfuse_lzo.static.x86_64
         
         # XZ
         zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=true -Denable-lzo=false -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_xz.static.x86_64
+
+    - name: Build (GLibC 2.16, x86_64)
+      run: |
+        # All compression algos
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu.2.16 -Denable-zlib=true -Duse-libdeflate=true -Denable-zstd=true -Denable-lz4=true -Denable-xz=true -Denable-lzo=true -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse.x86_64
+
+        # ZLIB
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu.2.16 -Denable-zlib=true -Duse-libdeflate=true -Denable-zstd=false -Denable-lz4=false -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_zlib.x86_64
+
+        # ZSTD
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu.2.16 -Denable-zlib=false -Denable-zstd=true -Denable-lz4=false -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_zstd.x86_64
+
+        # LZ4
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu.2.16 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=true -Denable-xz=false -Denable-lzo=false -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_lz4.x86_64
+
+        # LZO
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu.2.16 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=false -Denable-lzo=true -Duse-system-fuse=false
+        strip -s zig-out/bin/squashfuse
+        mv zig-out/bin/squashfuse squashfuse_lzo.x86_64
+        
+        # XZ
+        zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu.2.16 -Denable-zlib=false -Denable-zstd=false -Denable-lz4=false -Denable-xz=true -Denable-lzo=false -Duse-system-fuse=false
         strip -s zig-out/bin/squashfuse
         mv zig-out/bin/squashfuse squashfuse_xz.x86_64
 
     - name: Test
       run: |
         zig build test
-        zig build test -Doptimize=ReleaseSafe
-        zig build test -Doptimize=ReleaseFast
-        zig build test -Doptimize=ReleaseSmall
+        zig build test -Dtarget=x86_64-linux-gnu.2.16 -Doptimize=ReleaseSafe
+        zig build test -Dtarget=x86_64-linux-gnu.2.16 -Doptimize=ReleaseFast
+        zig build test -Dtarget=x86_64-linux-gnu.2.16 -Doptimize=ReleaseSmall
+
+        zig build test
+        zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+        zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
+        zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSmall
 
     - name: Upload build
       uses: "marvinpinto/action-automatic-releases@latest"

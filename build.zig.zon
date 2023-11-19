@@ -36,6 +36,10 @@
             .url = "https://www.oberhumer.com/opensource/lzo/download/minilzo-2.10.tar.gz",
             .hash = "1220a8ab36e23c4b6605c03ff7d625b6df9d484d861c02768b7461446812a3e5918f",
         },
+        .libsquashfuse = .{
+            .url = "https://github.com/vasi/squashfuse/archive/refs/tags/0.5.0.tar.gz",
+            .hash = "1220c044c77376093c42f68e23ad83ae27cb7c0b954a91bb616d6924484b359566e3",
+        },
 //        .libxz = .{
 //            .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.4.5.tar.gz",
 //            .hash = "1220201cf75bb89dbd79d5c0e8f6778f781c27fcbe5ae0e4de12f64a357c229f92cd",

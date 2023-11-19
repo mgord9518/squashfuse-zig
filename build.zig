@@ -429,8 +429,13 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
 
     const os_tag = exe.target.os_tag orelse builtin.os.tag;
 
-    // Add squashfuse source files
-    exe.addIncludePath(.{ .path = b.pathFromRoot("squashfuse") });
+    const libsquashfuse_dep = exe.step.owner.dependency("libsquashfuse", .{
+        .target = exe.target,
+        .optimize = exe.optimize,
+    });
+
+    exe.addIncludePath(libsquashfuse_dep.path("."));
+    exe.addIncludePath(.{ .path = b.pathFromRoot("squashfuse_config") });
 
     // TODO: Support other OSes besides Linux
     switch (os_tag) {
@@ -438,46 +443,51 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             exe.defineCMacro("HAVE_LINUX_TYPES_LE16", "1");
         },
         .windows => {
-            exe.addIncludePath(.{ .path = b.pathFromRoot("squashfuse/win") });
+            exe.addIncludePath(libsquashfuse_dep.path("win"));
         },
         else => {},
     }
 
+    exe.defineCMacro("FUSE_USE_VERSION", "32");
     exe.defineCMacro("HAVE_ASM_BYTEORDER", "1");
     exe.defineCMacro("HAVE_DECL_FUSE_ADD_DIRENTRY", "1");
     exe.defineCMacro("HAVE_DECL_FUSE_DAEMONIZE", "1");
     exe.defineCMacro("HAVE_DLFCN", "1");
     exe.defineCMacro("HAVE_ENDIAN_H", "1");
     exe.defineCMacro("HAVE_INTTYPES_H", "1");
-    exe.defineCMacro("HAVE_NEW_FUSE_UNMOUNT", "1");
+    exe.defineCMacro("HAVE_LIBPTHREAD", "1");
     exe.defineCMacro("HAVE_STDINT_H", "1");
     exe.defineCMacro("HAVE_STDIO_H", "1");
     exe.defineCMacro("HAVE_STDLIB_H", "1");
     exe.defineCMacro("HAVE_STRINGS_H", "1");
     exe.defineCMacro("HAVE_STRING_H", "1");
-    exe.defineCMacro("HAVE_SYS_STAT_H", "1");
     exe.defineCMacro("HAVE_SYS_SYSMACROS_H", "1");
     exe.defineCMacro("HAVE_SYS_TYPES_H", "1");
-    exe.defineCMacro("HAVE_UNISTD_H", "1");
-    exe.defineCMacro("NONSTD_PREAD_DEF", "CHANGE_XOPEN_SOURCE");
-    exe.defineCMacro("NONSTD_S_IFSOCK_DEF", "CHANGE_XOPEN_SOURCE");
+    exe.defineCMacro("SQFS_MULTITHREADED", "1");
 
-    exe.addCSourceFiles(.{
-        .files = &[_][]const u8{
-            b.pathFromRoot("squashfuse/fs.c"),
-            b.pathFromRoot("squashfuse/table.c"),
-            b.pathFromRoot("squashfuse/xattr.c"),
-            b.pathFromRoot("squashfuse/cache.c"),
-            b.pathFromRoot("squashfuse/dir.c"),
-            b.pathFromRoot("squashfuse/file.c"),
-            b.pathFromRoot("squashfuse/nonstd-makedev.c"),
-            b.pathFromRoot("squashfuse/nonstd-pread.c"),
-            b.pathFromRoot("squashfuse/nonstd-stat.c"),
-            b.pathFromRoot("squashfuse/stat.c"),
-            b.pathFromRoot("squashfuse/stack.c"),
-            b.pathFromRoot("squashfuse/swap.c"),
-        },
-    });
+    // Add squashfuse source files
+    const c_files = &[_][]const u8{
+        "fs.c",
+        "table.c",
+        "xattr.c",
+        "cache.c",
+        "cache_mt.c",
+        "dir.c",
+        "file.c",
+        "nonstd-makedev.c",
+        "nonstd-pread.c",
+        "nonstd-stat.c",
+        "stat.c",
+        "stack.c",
+        "swap.c",
+    };
+
+    for (c_files) |c_file| {
+        exe.addCSourceFile(.{
+            .file = libsquashfuse_dep.path(c_file),
+            .flags = &[_][]const u8{},
+        });
+    }
 
     exe.linkLibC();
 }
