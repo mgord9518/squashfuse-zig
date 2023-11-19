@@ -20,8 +20,8 @@ jobs:
     - name: Build (Musl libc, static, aarch64)
       run: ARCH=aarch64 OS=linux LIBC=musl ./build.sh
 
-    - name: Build (GLibC 2.16, aarch64)
-      run: ARCH=aarch64 OS=linux LIBC=gnu.2.16 ./build.sh
+    - name: Build (GLibC 2.17, aarch64)
+      run: ARCH=aarch64 OS=linux LIBC=gnu.2.17 ./build.sh
 
     - name: Build (Musl libc, static, x86)
       run: ARCH=x86 OS=linux LIBC=musl ./build.sh
