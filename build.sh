@@ -19,6 +19,7 @@ fi
 zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
+    -Dstrip=true \
     -Dbuild-squashfuse_tool=false \
     -Denable-zlib=true \
     -Duse-libdeflate=true \
@@ -28,13 +29,13 @@ zig build \
     -Denable-lzo=true \
     -Duse-system-fuse=false
 
-strip -s zig-out/bin/squashfuse
 mv zig-out/bin/squashfuse "squashfuse$prefix.$ARCH"
 
 # ZLIB
 zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
+    -Dstrip=true \
     -Dbuild-squashfuse_tool=false \
     -Denable-zlib=true \
     -Duse-libdeflate=true \
@@ -44,13 +45,13 @@ zig build \
     -Denable-lzo=false \
     -Duse-system-fuse=false
 
-strip -s zig-out/bin/squashfuse
 mv zig-out/bin/squashfuse "squashfuse_zlib$prefix.$ARCH"
 
 # ZSTD
 zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
+    -Dstrip=true \
     -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=true \
@@ -59,13 +60,13 @@ zig build \
     -Denable-lzo=false \
     -Duse-system-fuse=false
 
-strip -s zig-out/bin/squashfuse
 mv zig-out/bin/squashfuse "squashfuse_zstd$prefix.$ARCH"
 
 # LZ4
 zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
+    -Dstrip=true \
     -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=false \
@@ -74,13 +75,13 @@ zig build \
     -Denable-lzo=false \
     -Duse-system-fuse=false
 
-strip -s zig-out/bin/squashfuse
 mv zig-out/bin/squashfuse "squashfuse_lz4$prefix.$ARCH"
 
 # LZO
 zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
+    -Dstrip=true \
     -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=false \
@@ -89,13 +90,13 @@ zig build \
     -Denable-lzo=true \
     -Duse-system-fuse=false
 
-strip -s zig-out/bin/squashfuse
 mv zig-out/bin/squashfuse "squashfuse_lzo$prefix.$ARCH"
 
 # XZ
 zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
+    -Dstrip=true \
     -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=false \
@@ -104,5 +105,4 @@ zig build \
     -Denable-lzo=false \
     -Duse-system-fuse=false
 
-strip -s zig-out/bin/squashfuse
 mv zig-out/bin/squashfuse "squashfuse_xz$prefix.$ARCH"

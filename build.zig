@@ -19,6 +19,12 @@ pub fn build(b: *std.build.Builder) !void {
     const allocator = b.allocator;
 
     // TODO: add system flags for compression algos
+    const strip = b.option(
+        bool,
+        "strip",
+        "do not include debug info (default: false)",
+    ) orelse false;
+
     const use_system_fuse = b.option(
         bool,
         "use-system-fuse",
@@ -119,6 +125,7 @@ pub fn build(b: *std.build.Builder) !void {
     for (executable_list.items) |exe| {
         exe.target = target;
         exe.optimize = optimize;
+        exe.strip = strip;
 
         const clap_dep = b.dependency("clap", .{
             .target = target,
