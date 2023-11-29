@@ -447,7 +447,7 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
         else => {},
     }
 
-    exe.defineCMacro("FUSE_USE_VERSION", "32");
+    exe.defineCMacro("FUSE_USE_VERSION", "312");
     exe.defineCMacro("HAVE_ASM_BYTEORDER", "1");
     exe.defineCMacro("HAVE_DECL_FUSE_ADD_DIRENTRY", "1");
     exe.defineCMacro("HAVE_DECL_FUSE_DAEMONIZE", "1");

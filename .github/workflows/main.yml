@@ -26,9 +26,10 @@ jobs:
     - name: Build (Musl libc, static, x86)
       run: ARCH=x86 OS=linux LIBC=musl ./build.sh
 
-        # TODO: Get this build working
-        #    - name: Build (GLibC 2.16, x86)
-        #      run: ARCH=x86 OS=linux LIBC=gnu.2.16 ./build.sh
+    - name: Build (GLibC 2.16, x86)
+      run: ARCH=x86 OS=linux LIBC=gnu.2.16 ./build.sh
+
+    # TODO: ARM32 builds
 
     - name: Test
       run: |
