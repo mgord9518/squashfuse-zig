@@ -77,6 +77,7 @@ pub fn main() !void {
         if (env_map.get("NO_COLOR")) |_| {
             reset = "";
             orange = "";
+            red = "";
             light_blue = "";
             light_green = "";
             cyan = "";
@@ -212,7 +213,7 @@ pub fn main() !void {
     // Append single threading flag
     try args.append("-s");
 
-    var file_tree = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
+    const file_tree = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
     squash = Squash{ .image = sqfs, .file_tree = file_tree };
     defer sqfs.deinit();
 
@@ -314,7 +315,7 @@ const FuseOperations = struct {
             if (!std.mem.eql(u8, path, key[0..path.len])) break;
 
             if (std.mem.eql(u8, path, dirname)) {
-                var entry = squash.file_tree.get(key) orelse return fuse.MountError.NoEntry;
+                const entry = squash.file_tree.get(key) orelse return fuse.MountError.NoEntry;
                 var inode = squash.image.getInode(entry.id) catch return fuse.MountError.Io;
 
                 // Load file info into buffer

@@ -584,7 +584,7 @@ usingnamespace if (build_options.enable_xz)
             export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
                 var stream = io.fixedBufferStream(in[0..in_size]);
 
-                var allocator = std.heap.c_allocator;
+                const allocator = std.heap.c_allocator;
 
                 var decompressor = xz.decompress(
                     allocator,
@@ -593,7 +593,7 @@ usingnamespace if (build_options.enable_xz)
 
                 defer decompressor.deinit();
 
-                var buf = out[0..out_size.*];
+                const buf = out[0..out_size.*];
 
                 out_size.* = decompressor.read(buf) catch return c.SQFS_ERR;
 
@@ -740,7 +740,7 @@ usingnamespace if (build_options.enable_zstd)
             export fn zig_zstd_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
                 var stream = io.fixedBufferStream(in[0..in_size]);
 
-                var allocator = std.heap.c_allocator;
+                const allocator = std.heap.c_allocator;
 
                 var decompressor = zstd.decompressStream(
                     allocator,
@@ -749,7 +749,7 @@ usingnamespace if (build_options.enable_zstd)
 
                 defer decompressor.deinit();
 
-                var buf = out[0..out_size.*];
+                const buf = out[0..out_size.*];
 
                 out_size.* = decompressor.read(buf) catch return c.SQFS_ERR;
 

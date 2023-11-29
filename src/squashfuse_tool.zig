@@ -15,7 +15,7 @@ const version = std.SemanticVersion{
 };
 
 pub fn main() !void {
-    var allocator = std.heap.c_allocator;
+    const allocator = std.heap.c_allocator;
 
     var stderr = io.getStdErr().writer();
     var stdout = io.getStdOut().writer();
@@ -72,6 +72,7 @@ pub fn main() !void {
         if (env_map.get("NO_COLOR")) |_| {
             reset = "";
             orange = "";
+            red = "";
             light_blue = "";
             light_green = "";
             cyan = "";

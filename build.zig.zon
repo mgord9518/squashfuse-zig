@@ -18,7 +18,7 @@
         },
         .fuse = .{
             .url = "https://github.com/mgord9518/libfuse-zig/archive/refs/tags/continuous.tar.gz",
-            .hash = "1220efb3f969eda4dfc45d3992100039c7e5f147fae8e99b47a8911e6153ec606367",
+            .hash = "1220922be4f9fb37e1d31875aed857b44860c095a97b728090405ef1f8d874450323",
         },
         .libdeflate = .{
             .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz",
