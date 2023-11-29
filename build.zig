@@ -290,8 +290,6 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
                 .optimize = exe.optimize,
             });
 
-            exe.addIncludePath(libdeflate_dep.path("."));
-
             // TODO: is there a better way to do this?
             const c_files = &[_][]const u8{
                 "lib/adler32.c",
@@ -335,8 +333,6 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             .optimize = exe.optimize,
         });
 
-        exe.addIncludePath(liblz4_dep.path("lib"));
-
         exe.addCSourceFile(.{
             .file = liblz4_dep.path("lib/lz4.c"),
             .flags = &[_][]const u8{},
@@ -348,8 +344,6 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             .target = exe.target,
             .optimize = exe.optimize,
         });
-
-        exe.addIncludePath(liblzo_dep.path("."));
 
         exe.addCSourceFile(.{
             .file = liblzo_dep.path("minilzo.c"),
@@ -400,8 +394,6 @@ pub fn link(exe: *std.Build.Step.Compile, opts: LinkOptions) void {
             .target = exe.target,
             .optimize = exe.optimize,
         });
-
-        exe.addIncludePath(libzstd_dep.path("lib"));
 
         const c_files = &[_][]const u8{
             "lib/decompress/zstd_decompress.c",
