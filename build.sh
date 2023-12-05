@@ -20,7 +20,6 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
     -Dstrip=true \
-    -Dbuild-squashfuse_tool=false \
     -Denable-zlib=true \
     -Duse-libdeflate=true \
     -Denable-zstd=true \
@@ -36,7 +35,6 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
     -Dstrip=true \
-    -Dbuild-squashfuse_tool=false \
     -Denable-zlib=true \
     -Duse-libdeflate=true \
     -Denable-zstd=false \
@@ -52,7 +50,6 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
     -Dstrip=true \
-    -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=true \
     -Denable-lz4=false \
@@ -67,7 +64,6 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
     -Dstrip=true \
-    -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=false \
     -Denable-lz4=true \
@@ -82,7 +78,6 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
     -Dstrip=true \
-    -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=false \
     -Denable-lz4=false \
@@ -97,7 +92,6 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$target" \
     -Dstrip=true \
-    -Dbuild-squashfuse_tool=false \
     -Denable-zlib=false \
     -Denable-zstd=false \
     -Denable-lz4=false \

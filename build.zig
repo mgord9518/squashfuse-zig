@@ -16,8 +16,6 @@ fn initExecutable(b: *std.build.Builder, name: []const u8) !*std.Build.Step.Comp
 }
 
 pub fn build(b: *std.build.Builder) !void {
-    const allocator = b.allocator;
-
     // TODO: add system flags for compression algos
     const strip = b.option(
         bool,
@@ -73,32 +71,10 @@ pub fn build(b: *std.build.Builder) !void {
         "enable lzo decompression (default: true)",
     ) orelse true;
 
-    const build_squashfuse = b.option(
-        bool,
-        "build-squashfuse",
-        "whether or not to build main squashfuse executable (default: true)",
-    ) orelse true;
-
-    const build_squashfuse_tool = b.option(
-        bool,
-        "build-squashfuse_tool",
-        "whether or not to build FUSEless squashfuse_tool executable (default: true)",
-    ) orelse true;
-
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const executable_names = &[_]?[]const u8{
-        if (build_squashfuse) "squashfuse" else null,
-        if (build_squashfuse_tool) "squashfuse_tool" else null,
-    };
-
-    var executable_list = std.ArrayList(*std.Build.Step.Compile).init(allocator);
-    for (executable_names) |executable| {
-        if (executable) |name| {
-            try executable_list.append(try initExecutable(b, name));
-        }
-    }
+    var exe = try initExecutable(b, "squashfuse");
 
     const exe_options = b.addOptions();
     exe_options.addOption(bool, "enable_xz", enable_xz);
@@ -122,49 +98,47 @@ pub fn build(b: *std.build.Builder) !void {
         },
     });
 
-    for (executable_list.items) |exe| {
-        exe.target = target;
-        exe.optimize = optimize;
-        exe.strip = strip;
+    exe.target = target;
+    exe.optimize = optimize;
+    exe.strip = strip;
 
-        const clap_dep = b.dependency("clap", .{
-            .target = target,
-            .optimize = optimize,
-        });
+    const clap_dep = b.dependency("clap", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
-        const fuse_dep = b.dependency("fuse", .{
-            .target = target,
-            .optimize = optimize,
-        });
+    const fuse_dep = b.dependency("fuse", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
-        const fuse_module = b.addModule(
-            "fuse",
-            .{ .source_file = fuse_dep.module("fuse").source_file },
-        );
+    const fuse_module = b.addModule(
+        "fuse",
+        .{ .source_file = fuse_dep.module("fuse").source_file },
+    );
 
-        const clap_module = b.addModule("clap", .{
-            .source_file = clap_dep.path("clap.zig"),
-        });
+    const clap_module = b.addModule("clap", .{
+        .source_file = clap_dep.path("clap.zig"),
+    });
 
-        link(exe, .{
-            .enable_lz4 = enable_lz4,
-            .enable_lzo = enable_lzo,
-            .enable_zlib = enable_zlib,
-            .enable_zstd = enable_zstd,
-            .enable_xz = enable_xz,
+    link(exe, .{
+        .enable_lz4 = enable_lz4,
+        .enable_lzo = enable_lzo,
+        .enable_zlib = enable_zlib,
+        .enable_zstd = enable_zstd,
+        .enable_xz = enable_xz,
 
-            .enable_fuse = std.mem.eql(u8, exe.name, "squashfuse"),
-            .use_system_fuse = use_system_fuse,
+        .enable_fuse = std.mem.eql(u8, exe.name, "squashfuse"),
+        .use_system_fuse = use_system_fuse,
 
-            .use_libdeflate = use_libdeflate,
-        });
+        .use_libdeflate = use_libdeflate,
+    });
 
-        exe.addModule("squashfuse", squashfuse_module);
-        exe.addModule("fuse", fuse_module);
-        exe.addModule("clap", clap_module);
+    exe.addModule("squashfuse", squashfuse_module);
+    exe.addModule("fuse", fuse_module);
+    exe.addModule("clap", clap_module);
 
-        b.installArtifact(exe);
-    }
+    b.installArtifact(exe);
 
     // TODO: create symlinks in install directory
     //    if (build_squashfuse_tool) {
@@ -174,7 +148,7 @@ pub fn build(b: *std.build.Builder) !void {
     //        cwd.symLink("squashfuse_tool", "zig-out/bin/squashfuse_extract", .{}) catch {};
     //    }
 
-    const run_cmd = b.addRunArtifact(executable_list.items[0]);
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
@@ -185,8 +159,8 @@ pub fn build(b: *std.build.Builder) !void {
 
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "lib/test.zig" },
-        .target = executable_list.items[0].target,
-        .optimize = executable_list.items[0].optimize,
+        .target = exe.target,
+        .optimize = exe.optimize,
     });
 
     link(unit_tests, .{

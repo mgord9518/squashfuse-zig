@@ -1,5 +1,6 @@
 const std = @import("std");
 const fmt = std.fmt;
+const io = std.io;
 
 const fuse = @import("fuse");
 const clap = @import("clap");
@@ -16,8 +17,8 @@ var squash: Squash = undefined;
 
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 0,
-    .patch = 43,
+    .minor = 1,
+    .patch = 0,
 };
 
 pub fn main() !void {
@@ -28,15 +29,18 @@ pub fn main() !void {
     var stdout = std.io.getStdOut().writer();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help            display this help and exit
-        \\-f, --foreground      run in foreground
-        \\-d, --debug           enable debug output (runs in foreground)
-        // TODO:        \\-x, --extract         extract the entire SquashFS image
-        \\-l, --list            list file tree of SquashFS image
-        \\-o, --option <str>... use a mount option
+        \\-h, --help               display this help and exit
+        \\-f, --foreground         run in foreground
+        \\-d, --debug              enable debug output (runs in foreground)
+        \\-x, --extract            extract the SquashFS image
+        \\-l, --list               list file tree of SquashFS image
+        \\-o, --option <str>...    use a libFUSE mount option
         \\
         \\    --offset <usize>  mount at an offset
+        \\    --extract-src <str>  must be used with `--extract`; specify the source inode
+        \\    --extract-dest <str> must be used with `--extract`; specify the destination name
         \\    --version         print the current version
+        \\    --verbose         enable verbose printing
         \\<str>...
     );
 
@@ -58,16 +62,19 @@ pub fn main() !void {
     var light_green: []const u8 = "\x1b[0;92m";
     var cyan: []const u8 = "\x1b[0;36m";
 
+    // TODO: move formatting code into its own function or possibly new package
     if (res.args.help != 0 or res.positionals.len == 0) {
         // Obtain the longest argument length
         var longest_normal: usize = 0;
         var longest_long_only: usize = 0;
         for (params) |param| {
             if (param.names.long) |long_name| {
+                const suffix = if (param.id.val.len > 0) param.id.val.len + 3 else 0;
+                const new_len = long_name.len + suffix;
                 if (param.names.short) |_| {
-                    if (long_name.len > longest_normal) longest_normal = long_name.len;
+                    if (new_len > longest_normal) longest_normal = new_len;
                 } else {
-                    if (long_name.len > longest_long_only) longest_long_only = long_name.len;
+                    if (new_len > longest_long_only) longest_long_only = new_len;
                 }
             }
         }
@@ -110,11 +117,21 @@ pub fn main() !void {
             }
 
             if (param.names.long) |long_name| {
-                try stderr.print("{s}--{s}{s}:", .{ cyan, long_name, reset });
+                var type_len: usize = 0;
+
+                try stderr.print("  {s}--{s}{s}", .{ cyan, long_name, reset });
+                if (param.id.val.len > 0) {
+                    type_len = param.id.val.len + 3;
+                }
+                try stderr.print(":", .{});
 
                 // Pad all equal to the longest GNU-style flag
-                for (long_name.len..longest_normal) |_| {
+                for (long_name.len + type_len..longest_normal) |_| {
                     try stderr.print(" ", .{});
+                }
+
+                if (param.id.val.len > 0) {
+                    try stderr.print(" <{s}>", .{param.id.val});
                 }
 
                 try stderr.print("  {s}\n", .{param.id.description()});
@@ -131,11 +148,21 @@ pub fn main() !void {
             if (param.names.long) |long_name| {
                 if (param.names.short) |_| continue;
 
-                try stderr.print("  {s}--{s}{s}:", .{ cyan, long_name, reset });
+                var type_len: usize = 0;
+
+                try stderr.print("  {s}--{s}{s}", .{ cyan, long_name, reset });
+                if (param.id.val.len > 0) {
+                    type_len = param.id.val.len + 3;
+                }
+                try stderr.print(":", .{});
 
                 // Pad all equal to the longest GNU-style flag
-                for (long_name.len..longest_long_only) |_| {
+                for (long_name.len + type_len..longest_long_only) |_| {
                     try stderr.print(" ", .{});
+                }
+
+                if (param.id.val.len > 0) {
+                    try stderr.print(" <{s}>", .{param.id.val});
                 }
 
                 try stderr.print("  {s}\n", .{param.id.description()});
@@ -220,6 +247,28 @@ pub fn main() !void {
     var root_inode = squash.image.getRootInode();
     var walker = try root_inode.walk(allocator);
     defer walker.deinit();
+
+    var extract_args_len: usize = 0;
+    for (res.args.extract) |_| {
+        extract_args_len += 1;
+    }
+
+    const src = if (res.args.@"extract-src" != null) res.args.@"extract-src".? else "/";
+
+    // TODO: use basename of src if not `/`
+    const dest = if (res.args.@"extract-dest" != null) res.args.@"extract-dest".? else "squashfs-root";
+
+    if (res.args.extract != 0) {
+        try extractArchive(
+            allocator,
+            &sqfs,
+            src,
+            dest,
+            .{ .verbose = res.args.verbose != 0 },
+        );
+
+        return;
+    }
 
     if (res.args.list != 0) {
         while (try walker.next()) |entry| {
@@ -381,3 +430,87 @@ const FuseOperations = struct {
         };
     }
 };
+
+const ExtractArchiveOptions = struct {
+    verbose: bool = false,
+};
+
+fn extractArchive(
+    allocator: std.mem.Allocator,
+    sqfs: *SquashFs,
+    src: []const u8,
+    dest: []const u8,
+    opts: ExtractArchiveOptions,
+) !void {
+    var stdout = io.getStdOut().writer();
+
+    var root_inode = sqfs.getRootInode();
+
+    var walker = try root_inode.walk(allocator);
+    defer walker.deinit();
+
+    // Remove slashes at the beginning and end of path
+    var real_src = if (src[0] == '/') blk: {
+        break :blk src[1..];
+    } else blk: {
+        break :blk src;
+    };
+
+    if (real_src.len > 0 and real_src[real_src.len - 1] == '/') {
+        real_src.len -= 1;
+    }
+
+    if (real_src.len == 0) {
+        const cwd = std.fs.cwd();
+        try cwd.makeDir(dest);
+    }
+
+    var file_found = false;
+
+    // Iterate over the SquashFS image and extract each item
+    while (try walker.next()) |entry| {
+        // Skip if the path doesn't match our source
+        if (entry.path.len < real_src.len or !std.mem.eql(u8, real_src, entry.path[0..real_src.len])) {
+            continue;
+        }
+
+        // Skip files that begin with the same path but aren't the exact same
+        // or a directory
+        //
+        // Example:
+        // `test/file` would pass this test
+        // `test`      would also pass
+        // `test-file` would fail and get skipped
+        if (real_src.len > 0 and entry.path.len > real_src.len and entry.path[real_src.len] != '/') {
+            continue;
+        }
+
+        file_found = true;
+
+        var path_buf: [std.os.PATH_MAX]u8 = undefined;
+        const prefixed_dest = switch (real_src.len) {
+            0 => try fmt.bufPrint(&path_buf, "{s}/{s}", .{
+                dest,
+                entry.path,
+            }),
+            else => try fmt.bufPrint(&path_buf, "{s}{s}", .{
+                dest,
+                entry.path[real_src.len..],
+            }),
+        };
+
+        if (opts.verbose) {
+            try stdout.print("{s}\n", .{prefixed_dest});
+        }
+
+        // TODO: flag to change buf size
+        var buf: [4096]u8 = undefined;
+
+        var inode = entry.inode();
+        try inode.extract(&buf, prefixed_dest);
+    }
+
+    if (!file_found) {
+        std.debug.print("file ({s}) not found!\n", .{real_src});
+    }
+}
