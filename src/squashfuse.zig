@@ -29,18 +29,19 @@ pub fn main() !void {
     var stdout = std.io.getStdOut().writer();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help               display this help and exit
-        \\-f, --foreground         run in foreground
-        \\-d, --debug              enable debug output (runs in foreground)
-        \\-x, --extract            extract the SquashFS image
-        \\-l, --list               list file tree of SquashFS image
-        \\-o, --option <str>...    use a libFUSE mount option
+        \\-h, --help             display this help and exit
+        \\-f, --foreground       run in foreground
+        \\-d, --debug            enable debug output (runs in foreground)
+        \\-x, --extract          extract the SquashFS image
+        \\-l, --list             list file tree of SquashFS image
+        \\-o, --option <str>...  use a libFUSE mount option
         \\
-        \\    --offset <usize>  mount at an offset
-        \\    --extract-src <str>  must be used with `--extract`; specify the source inode
-        \\    --extract-dest <str> must be used with `--extract`; specify the destination name
-        \\    --version         print the current version
-        \\    --verbose         enable verbose printing
+        \\--offset <usize>      mount at an offset
+        \\--extract-src <str>   must be used with `--extract`; specify the source inode
+        \\--extract-dest <str>  must be used with `--extract`; specify the destination name
+        \\--version             print the current version
+        \\--verbose             enable verbose printing
+        \\
         \\<str>...
     );
 
@@ -467,6 +468,11 @@ fn extractArchive(
 
     var file_found = false;
 
+    // TODO: flag to change buf size
+    const buf_size = 1024 * 1024;
+    const buf = try allocator.alloc(u8, buf_size);
+    defer allocator.free(buf);
+
     // Iterate over the SquashFS image and extract each item
     while (try walker.next()) |entry| {
         // Skip if the path doesn't match our source
@@ -503,13 +509,11 @@ fn extractArchive(
             try stdout.print("{s}\n", .{prefixed_dest});
         }
 
-        // TODO: flag to change buf size
-        var buf: [4096]u8 = undefined;
-
         var inode = entry.inode();
-        try inode.extract(&buf, prefixed_dest);
+        try inode.extract(buf, prefixed_dest);
     }
 
+    // TODO: better error message
     if (!file_found) {
         std.debug.print("file ({s}) not found!\n", .{real_src});
     }

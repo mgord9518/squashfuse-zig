@@ -17,6 +17,7 @@ test "open SquashFS image (zlib)" {
 }
 
 // TODO: more tests
+// TODO: test executable mounting, extracting, etc
 fn testWalk(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
     var root_inode = sqfs.getRootInode();
 

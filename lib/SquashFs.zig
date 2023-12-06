@@ -650,15 +650,42 @@ usingnamespace if (build_options.enable_zlib)
             *usize,
         ) c_int;
 
-        var ldef_decompressor: ?*anyopaque = null;
+        // Deflate constants
+        const litlen_syms = 288;
+        const offset_syms = 32;
+        const max_lens_overrun = 137;
+        const max_num_syms = 288;
+        const precode_syms = 19;
+
+        // LibDeflate constants
+        const precode_enough = 128;
+        const litlen_enough = 2342;
+        const offset_enough = 402;
+
+        const Decompressor = extern struct {
+            _: extern union {
+                precode_lens: [precode_syms]u8,
+
+                _: extern struct {
+                    lens: [litlen_syms + offset_syms + max_lens_overrun]u8,
+                    precode_table: [precode_enough]u32,
+                },
+
+                litlen_decode_table: [litlen_enough]u32,
+            } = undefined,
+
+            offset_decode_table: [offset_enough]u32 = undefined,
+            sorted_syms: [max_num_syms]u16 = undefined,
+            static_codes_loaded: bool = false,
+            litlen_tablebits: u32 = undefined,
+            free_func: ?*anyopaque = undefined,
+        };
 
         export fn zig_zlib_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-            if (ldef_decompressor == null) {
-                ldef_decompressor = libdeflate_alloc_decompressor();
-            }
+            var decompressor = Decompressor{};
 
             const err = libdeflate_zlib_decompress(
-                ldef_decompressor.?,
+                &decompressor,
                 in,
                 in_size,
                 out,

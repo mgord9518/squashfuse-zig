@@ -12,11 +12,11 @@ My main goals for this project are as follows:
    but the vast majority is still just bindings
 
 With some very basic benchmarking, extracting a zlib-compressed AppImage
-(FreeCAD, the largest AppImage I've been able to find so far), takes 3.7
-seconds using squashfuse-zig's `squashfuse_tool`. Currently, `squashfs_tool`
-is single-thread only.
+(FreeCAD, the largest AppImage I've been able to find so far), takes 3.1
+seconds using the `--extract` flag with squashfuse-zig's CLI tool, which
+is currently single-thread only.
 
-For reference, `unsquashfs` with multi-threaded decompression takes 1.57 seconds
+For reference, `unsquashfs` with multi-threaded decompression takes 1.5 seconds
 and single-threaded takes 6.5 seconds.
 
 Surely almost all of the single-threaded performace gain can be chalked up to
