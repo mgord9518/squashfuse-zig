@@ -601,40 +601,49 @@ usingnamespace if (build_options.enable_xz)
             }
         }
     else
-        struct {}
-    //    else
-    //        struct {
-    //            const xz_c = @cImport({
-    //                @cInclude("lzma.h");
-    //            });
-    //
-    //            export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
-    //                var memlimit: u64 = 0xffff_ffff_ffff_ffff;
-    //
-    //                var inpos: usize = 0;
-    //                var outpos: usize = 0;
-    //
-    //                var err = xz_c.lzma_stream_buffer_decode(
-    //                    &memlimit,
-    //                    0,
-    //                    null,
-    //                    in,
-    //                    &inpos,
-    //                    in_size,
-    //                    out,
-    //                    &outpos,
-    //                    out_size.*,
-    //                );
-    //
-    //                out_size.* = outpos;
-    //
-    //                if (err != xz_c.LZMA_OK) {
-    //                    return c.SQFS_ERR;
-    //                }
-    //
-    //                return 0;
-    //            }
-    //        }
+        struct {
+            extern fn lzma_stream_buffer_decode(
+                memlemit: *u64,
+                flags: u32,
+                // TODO: set allocator
+                allocator: ?*anyopaque,
+                in: [*]const u8,
+                in_pos: *usize,
+                in_size: usize,
+                out: [*]u8,
+                out_pos: *usize,
+                out_size: usize,
+            ) c_int;
+
+            export fn zig_xz_decode(in: [*]u8, in_size: usize, out: [*]u8, out_size: *usize) callconv(.C) c.sqfs_err {
+                var memlimit: u64 = 0xffff_ffff_ffff_ffff;
+
+                var inpos: usize = 0;
+                var outpos: usize = 0;
+
+                const err = lzma_stream_buffer_decode(
+                    &memlimit,
+                    0,
+                    null,
+                    in,
+                    &inpos,
+                    in_size,
+                    out,
+                    &outpos,
+                    out_size.*,
+                );
+
+                out_size.* = outpos;
+
+                //                std.debug.print("ERR: {d} {d}\n", .{ err, out_size.* });
+
+                if (err != 0) {
+                    return c.SQFS_ERR;
+                }
+
+                return c.SQFS_OK;
+            }
+        }
 else
     struct {};
 

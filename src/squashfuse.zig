@@ -45,7 +45,9 @@ pub fn main() !void {
         \\<str>...
     );
 
-    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{});
+    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{
+        .allocator = allocator,
+    });
     defer res.deinit();
 
     var args = std.ArrayList([:0]const u8).init(allocator);

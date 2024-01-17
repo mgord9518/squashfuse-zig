@@ -1,6 +1,6 @@
 .{
     .name = "squashfuse-zig",
-    .version = "0.0.43",
+    .version = "0.0.44",
 
     .paths = [][]const u8 {
         "build.zig",
@@ -13,12 +13,13 @@
 
     .dependencies = .{
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.7.0.tar.gz",
-            .hash = "1220f48518ce22882e102255ed3bcdb7aeeb4891f50b2cdd3bd74b5b2e24d3149ba2",
+//            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.7.0.tar.gz",
+            .url = "https://github.com/Hejsil/zig-clap/archive/9c23bcb5aebe0c2542b4de4472f60959974e2222.tar.gz",
+            .hash = "12209e829da9d7d0bc089e4e0cbc07bb882f6192cd583277277da34df53cd05b8f2a",
         },
         .fuse = .{
             .url = "https://github.com/mgord9518/libfuse-zig/archive/refs/tags/continuous.tar.gz",
-            .hash = "12203ef757ea2db8bc8d59bb114be99e412c5c7032d8d265bbb1c08d8b8c54a6f84e",
+            .hash = "12200e63ae7f2f952d60d09b1b9b0d8121b61d006469227c448630fe3672f3906c13",
         },
         .libdeflate = .{
             .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz",
@@ -40,9 +41,9 @@
             .url = "https://github.com/vasi/squashfuse/archive/refs/tags/0.5.0.tar.gz",
             .hash = "1220c044c77376093c42f68e23ad83ae27cb7c0b954a91bb616d6924484b359566e3",
         },
-//        .libxz = .{
-//            .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.4.5.tar.gz",
-//            .hash = "1220201cf75bb89dbd79d5c0e8f6778f781c27fcbe5ae0e4de12f64a357c229f92cd",
-//        },
+        .libxz = .{
+            .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.4.5.tar.gz",
+            .hash = "1220201cf75bb89dbd79d5c0e8f6778f781c27fcbe5ae0e4de12f64a357c229f92cd",
+        },
     },
 }
