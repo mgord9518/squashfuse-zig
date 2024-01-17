@@ -54,8 +54,8 @@ pub fn build(b: *std.Build) !void {
     const use_zig_xz = b.option(
         bool,
         "use-zig-xz",
-        "use Zig stdlib xz implementation (default: false)",
-    ) orelse false;
+        "use Zig stdlib xz implementation (default: true)",
+    ) orelse true;
 
     const enable_lzo = b.option(
         bool,
