@@ -9,6 +9,14 @@ pub const SquashFsError = squashfuse.SquashFsError;
 pub const InodeId = squashfuse.InodeId;
 pub const SquashFs = squashfuse.SquashFs;
 
+const compression_algos = &[_][]const u8{
+    "xz",
+    "zlib",
+    "zstd",
+    "lzo",
+    "lz4",
+};
+
 test "open SquashFS image (zlib)" {
     const allocator = std.testing.allocator;
 
@@ -16,64 +24,30 @@ test "open SquashFS image (zlib)" {
     defer sqfs.deinit();
 }
 
-// TODO: more tests
-// TODO: test executable mounting, extracting, etc
-fn testWalk(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
-    var root_inode = sqfs.getRootInode();
-
-    var walker = try root_inode.walk(allocator);
-    defer walker.deinit();
-
-    var idx: usize = 0;
-    while (try walker.next()) |entry| {
-        try expect(std.mem.eql(u8, entry.path, file_tree[idx]));
-
-        idx += 1;
-    }
-
-    // Make sure the entire list has been hit
-    try expect(idx == file_tree.len);
-}
-
 // TODO: loop and test all compression algos
 test "walk tree" {
     const allocator = std.testing.allocator;
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_zlib.sqfs", .{});
-        defer sqfs.deinit();
-        try testWalk(allocator, &sqfs);
-    }
+    inline for (compression_algos) |algo| {
+        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_xz.sqfs", .{});
+        var sqfs = try SquashFs.init(allocator, file_path, .{});
         defer sqfs.deinit();
-        try testWalk(allocator, &sqfs);
-    }
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_lz4.sqfs", .{});
-        defer sqfs.deinit();
-        try testWalk(allocator, &sqfs);
-    }
+        var root_inode = sqfs.getRootInode();
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_lzo.sqfs", .{});
-        defer sqfs.deinit();
-        try testWalk(allocator, &sqfs);
-    }
+        var walker = try root_inode.walk(allocator);
+        defer walker.deinit();
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_zstd.sqfs", .{});
-        defer sqfs.deinit();
-        try testWalk(allocator, &sqfs);
-    }
-}
+        var idx: usize = 0;
+        while (try walker.next()) |entry| {
+            try expect(std.mem.eql(u8, entry.path, file_tree[idx]));
 
-// Small helper function to allow freeing slices with defer
-fn freeList(allocator: std.mem.Allocator, list: []const []const u8) void {
-    for (list) |string| {
-        allocator.free(string);
+            idx += 1;
+        }
+
+        // Make sure the entire list has been hit
+        try expect(idx == file_tree.len);
     }
 }
 
@@ -94,7 +68,9 @@ fn testRead(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
 
     // As the hashmap keys were allocated, free them at function exit
     const keys = file_tree_hashmap.keys();
-    defer freeList(allocator, keys);
+    defer for (keys) |key| {
+        allocator.free(key);
+    };
 
     var buf: [1024 * 65]u8 = undefined;
 
@@ -124,33 +100,12 @@ fn testRead(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
 test "read" {
     const allocator = std.testing.allocator;
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_zlib.sqfs", .{});
-        defer sqfs.deinit();
-        try testRead(allocator, &sqfs);
-    }
+    inline for (compression_algos) |algo| {
+        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_xz.sqfs", .{});
+        var sqfs = try SquashFs.init(allocator, file_path, .{});
         defer sqfs.deinit();
-        try testRead(allocator, &sqfs);
-    }
 
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_lz4.sqfs", .{});
-        defer sqfs.deinit();
-        try testRead(allocator, &sqfs);
-    }
-
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_lzo.sqfs", .{});
-        defer sqfs.deinit();
-        try testRead(allocator, &sqfs);
-    }
-
-    {
-        var sqfs = try SquashFs.init(allocator, "test/tree_zstd.sqfs", .{});
-        defer sqfs.deinit();
         try testRead(allocator, &sqfs);
     }
 }
