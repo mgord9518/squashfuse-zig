@@ -12,7 +12,6 @@ const c = @cImport({
     @cInclude("squashfuse.h");
     @cInclude("common.h");
 
-    @cInclude("nonstd.h");
     @cInclude("swap.h");
 });
 
@@ -78,19 +77,10 @@ pub const SquashFs = struct {
             opts.offset,
         );
 
-        var major: c_int = 0;
-        var minor: c_int = 0;
-
         // Set version
-        c.sqfs_version(
-            &sqfs.internal,
-            &major,
-            &minor,
-        );
-
         sqfs.version = .{
-            .major = @intCast(major),
-            .minor = @intCast(minor),
+            .major = @intCast(sqfs.internal.sb.s_major),
+            .minor = @intCast(sqfs.internal.sb.s_minor),
             .patch = 0,
         };
 
@@ -110,7 +100,7 @@ pub const SquashFs = struct {
             sqfs.internal.sb.fragments,
         );
 
-        if (c.sqfs_export_ok(&sqfs.internal) != 0) {
+        if (sqfs.internal.sb.lookup_table_start != c.SQUASHFS_INVALID_BLK) {
             table.deinitTable(
                 sqfs.allocator,
                 @ptrCast(&sqfs.internal.export_table),
@@ -155,26 +145,32 @@ pub const SquashFs = struct {
         pos: u64 = 0,
 
         /// Reads the link target into `buf`
-        pub fn readLink(self: *Inode, buf: []u8) ![]const u8 {
-            var size = buf.len;
+        pub fn readLink(inode: *Inode, buf: []u8) ![]const u8 {
+            if (inode.kind != .sym_link) {
+                // TODO: rename
+                return error.NotLink;
+            }
 
-            const err = c.sqfs_readlink(
-                &self.parent.internal,
-                &self.internal,
+            const len = inode.internal.xtra.symlink_size;
+
+            if (len >= buf.len) {
+                return error.NoSpaceLeft;
+            }
+
+            var cur = inode.internal.next;
+            try SquashFsErrorFromInt(c.sqfs_md_read(
+                &inode.parent.internal,
+                &cur,
                 buf.ptr,
-                &size,
-            );
-            try SquashFsErrorFromInt(err);
+                len,
+            ));
 
-            return std.mem.sliceTo(
-                @as([*:0]const u8, @ptrCast(buf.ptr)),
-                0,
-            );
+            return buf[0..len];
         }
 
         // TODO: handle buffer when too small
         pub fn readLinkZ(self: *Inode, buf: []u8) ![:0]const u8 {
-            const link_target = try self.readLink(buf);
+            const link_target = try self.readLink(buf[0 .. buf.len - 1]);
             buf[link_target.len] = '\x00';
 
             return buf[0..link_target.len :0];
@@ -621,13 +617,27 @@ fn dirNext(
 
         try dirMdRead(sqfs, dir, &dir.header, @sizeOf(@TypeOf(dir.header)));
 
-        c.sqfs_swapin_dir_header(&dir.header);
+        dir.header = @bitCast(
+            std.mem.littleToNative(
+                u96,
+                @bitCast(dir.header),
+            ),
+        );
+
+        //        c.sqfs_swapin_dir_header(&dir.header);
         dir.header.count += 1;
     }
 
     try dirMdRead(sqfs, dir, &e, @sizeOf(@TypeOf(e)));
 
-    c.sqfs_swapin_dir_entry(&e);
+    e = @bitCast(
+        std.mem.littleToNative(
+            u64,
+            @bitCast(e),
+        ),
+    );
+
+    //c.sqfs_swapin_dir_entry(&e);
 
     dir.header.count -= 1;
 
@@ -657,11 +667,22 @@ fn initInternal(
 
     const SqfsSb = @TypeOf(sqfs.sb);
 
-    if (c.sqfs_pread(fd, &sqfs.sb, @sizeOf(SqfsSb), @intCast(sqfs.offset)) != @sizeOf(SqfsSb)) {
+    //if (c.sqfs_pread(fd, &sqfs.sb, @sizeOf(SqfsSb), @intCast(sqfs.offset)) != @sizeOf(SqfsSb)) {
+    const sb_buf: [*]u8 = @ptrCast(&sqfs.sb);
+    if (try std.os.pread(fd, sb_buf[0..@sizeOf(SqfsSb)], @intCast(sqfs.offset)) != @sizeOf(SqfsSb)) {
         return SquashFsError.InvalidFormat;
     }
 
-    c.sqfs_swapin_super_block(&sqfs.sb);
+    // Swap endianness if necessary
+    sqfs.sb = @bitCast(
+        std.mem.littleToNative(
+            u768,
+            @bitCast(sqfs.sb),
+        ),
+    );
+
+    //c.sqfs_swapin_super_block(&sqfs.sb);
+
     if (sqfs.sb.s_magic != c.SQUASHFS_MAGIC) {
         if (sqfs.sb.s_magic != c.SQFS_MAGIC_SWAP) {
             return SquashFsError.InvalidFormat;
@@ -700,7 +721,7 @@ fn initInternal(
         sqfs.sb.fragments,
     );
 
-    if (c.sqfs_export_ok(sqfs) != 0) {
+    if (sqfs.sb.lookup_table_start != c.SQUASHFS_INVALID_BLK) {
         try table.initTable(
             allocator,
             @ptrCast(&sqfs.export_table),

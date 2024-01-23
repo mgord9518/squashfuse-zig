@@ -2,6 +2,7 @@
 // algos
 
 const std = @import("std");
+const os = std.os;
 const expect = std.testing.expect;
 const squashfuse = @import("squashfuse");
 
@@ -110,6 +111,40 @@ test "read" {
     }
 }
 
+test "read link" {
+    const allocator = std.testing.allocator;
+
+    inline for (compression_algos) |algo| {
+        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
+
+        var sqfs = try SquashFs.init(allocator, file_path, .{});
+        defer sqfs.deinit();
+
+        var root_inode = sqfs.getRootInode();
+
+        var walker = try root_inode.walk(allocator);
+        defer walker.deinit();
+
+        var idx: usize = 0;
+        while (try walker.next()) |entry| : (idx += 1) {
+            if (!std.mem.eql(u8, entry.path, "symlink")) {
+                continue;
+            }
+
+            var buf: [os.PATH_MAX]u8 = undefined;
+            var inode = entry.inode();
+
+            const link_target = try inode.readLink(&buf);
+
+            try expect(std.mem.eql(
+                u8,
+                link_target,
+                "2/text",
+            ));
+        }
+    }
+}
+
 // The file structure of the test image filetree
 const file_tree = &[_][]const u8{
     "1",
@@ -120,6 +155,8 @@ const file_tree = &[_][]const u8{
     "2/text",
     // Very long filename
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "broken_symlink",
+    "symlink",
 };
 
 const text_contents =
