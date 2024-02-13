@@ -355,7 +355,7 @@ pub fn build(b: *std.Build) !void {
         "table.c",
         "xattr.c",
         "cache.c",
-        "cache_mt.c",
+        //        "cache_mt.c",
         "dir.c",
         "file.c",
         "nonstd-makedev.c",
@@ -369,7 +369,9 @@ pub fn build(b: *std.Build) !void {
     for (c_files) |c_file| {
         lib.addCSourceFile(.{
             .file = libsquashfuse_dep.path(c_file),
-            .flags = &[_][]const u8{},
+            .flags = &[_][]const u8{
+                //         "-std=c11",
+            },
         });
     }
 

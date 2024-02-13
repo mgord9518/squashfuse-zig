@@ -11,10 +11,10 @@ pub const InodeId = squashfuse.InodeId;
 pub const SquashFs = squashfuse.SquashFs;
 
 const compression_algos = &[_][]const u8{
-    "xz",
-    "zlib",
-    "zstd",
-    "lzo",
+    //    "xz",
+    //   "zlib",
+    //  "zstd",
+    // "lzo",
     "lz4",
 };
 

@@ -45,9 +45,41 @@ pub fn main() !void {
         \\<str>...
     );
 
-    var res = try clap.parse(clap.Help, &params, clap.parsers.default, .{
+    var reset: []const u8 = "\x1b[0;0m";
+    var orange: []const u8 = "\x1b[0;33m";
+    var red: []const u8 = "\x1b[0;31m";
+    var light_blue: []const u8 = "\x1b[0;94m";
+    var light_green: []const u8 = "\x1b[0;92m";
+    var cyan: []const u8 = "\x1b[0;36m";
+
+    const env_map = try std.process.getEnvMap(allocator);
+
+    if (env_map.get("NO_COLOR")) |_| {
+        reset = "";
+        orange = "";
+        red = "";
+        light_blue = "";
+        light_green = "";
+        cyan = "";
+    }
+
+    var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
         .allocator = allocator,
-    });
+    }) catch |err| {
+        const error_string = switch (err) {
+            error.InvalidArgument => "unknown option given; use `--help` to get available options",
+            else => return err,
+        };
+
+        try stderr.print("{s}::{s} {s}\n", .{
+            red,
+            reset,
+            error_string,
+        });
+
+        std.os.exit(1);
+    };
+
     defer res.deinit();
 
     var args = std.ArrayList([:0]const u8).init(allocator);
@@ -57,13 +89,6 @@ pub fn main() !void {
     try args.append(args_it.next().?);
 
     var sqfs: SquashFs = undefined;
-
-    var reset: []const u8 = "\x1b[0;0m";
-    var orange: []const u8 = "\x1b[0;33m";
-    var red: []const u8 = "\x1b[0;31m";
-    var light_blue: []const u8 = "\x1b[0;94m";
-    var light_green: []const u8 = "\x1b[0;92m";
-    var cyan: []const u8 = "\x1b[0;36m";
 
     // TODO: move formatting code into its own function or possibly new package
     if (res.args.help != 0 or res.positionals.len == 0) {
@@ -80,17 +105,6 @@ pub fn main() !void {
                     if (new_len > longest_long_only) longest_long_only = new_len;
                 }
             }
-        }
-
-        const env_map = try std.process.getEnvMap(allocator);
-
-        if (env_map.get("NO_COLOR")) |_| {
-            reset = "";
-            orange = "";
-            red = "";
-            light_blue = "";
-            light_green = "";
-            cyan = "";
         }
 
         if (res.args.version != 0) {
@@ -177,8 +191,16 @@ pub fn main() !void {
             \\{s}enviornment variables{s}:
             \\  {s}NO_COLOR{s}: disable color
             \\
+            \\{s}this build can decompress{s}:
             \\
-        , .{ orange, reset, cyan, reset });
+        , .{ orange, reset, cyan, reset, orange, reset });
+
+        inline for (std.meta.fields(SquashFs.Compression)) |algo| {
+            try stderr.print(
+                \\  {s}{s}{s},
+                \\
+            , .{ cyan, algo.name, reset });
+        }
 
         return;
     }
@@ -217,7 +239,20 @@ pub fn main() !void {
             sqfs = SquashFs.init(allocator, arg, .{
                 .offset = offset,
             }) catch |err| {
-                try stderr.print("{s}::{s} failed to open image: {!}\n", .{ red, reset, err });
+                const error_string = switch (err) {
+                    error.InvalidCompression => "unsupported compression algorithm",
+                    error.InvalidFormat => "unknown file type, doesn't look like a SquashFS image",
+                    error.FileNotFound => try std.fmt.allocPrint(allocator, "file `{s}` not found", .{arg}),
+                    error.AccessDenied => "permission denied",
+                    else => return err,
+                };
+
+                try stderr.print("{s}::{s} failed to read image: {s}\n", .{
+                    red,
+                    reset,
+                    error_string,
+                });
+
                 std.os.exit(1);
             };
 
@@ -256,10 +291,10 @@ pub fn main() !void {
         extract_args_len += 1;
     }
 
-    const src = if (res.args.@"extract-src" != null) res.args.@"extract-src".? else "/";
+    const src = res.args.@"extract-src" orelse "/";
 
     // TODO: use basename of src if not `/`
-    const dest = if (res.args.@"extract-dest" != null) res.args.@"extract-dest".? else "squashfs-root";
+    const dest = res.args.@"extract-dest" orelse "squashfs-root";
 
     if (res.args.extract != 0) {
         try extractArchive(
@@ -388,6 +423,8 @@ const FuseOperations = struct {
     pub fn readLink(path: [:0]const u8, buf: []u8) fuse.MountError![]const u8 {
         var entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
         var inode = entry.inode();
+
+        std.debug.print("BUFLEN: {d}\n", .{buf.len});
 
         if (entry.kind != .sym_link) return fuse.MountError.InvalidArgument;
 
