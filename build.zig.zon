@@ -1,6 +1,6 @@
 .{
     .name = "squashfuse-zig",
-    .version = "0.0.47",
+    .version = "0.0.50",
 
     .paths = [][]const u8 {
         "build.zig",

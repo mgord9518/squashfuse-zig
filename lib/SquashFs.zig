@@ -752,7 +752,7 @@ pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decomp
         },
         .lzma => {},
         .xz => {
-            if (comptime build_options.enable_zlib) return algos.xzDecode;
+            if (comptime build_options.enable_xz) return algos.xzDecode;
         },
         .lzo => {
             if (comptime build_options.enable_lzo) return algos.lzoDecode;
