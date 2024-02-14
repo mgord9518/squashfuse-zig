@@ -306,12 +306,16 @@ pub const SquashFs = struct {
 
             var cur = inode.internal.next;
 
-            try mdRead(inode.parent.arena.allocator(), inode.parent, &cur, buf[0..len]);
+            try mdRead(
+                inode.parent.arena.allocator(),
+                inode.parent,
+                &cur,
+                buf[0..len],
+            );
 
             return buf[0..len];
         }
 
-        // TODO: handle buffer when too small
         pub fn readLinkZ(self: *Inode, buf: []u8) ![:0]const u8 {
             const link_target = try self.readLink(buf[0 .. buf.len - 1]);
             buf[link_target.len] = '\x00';
@@ -393,12 +397,6 @@ pub const SquashFs = struct {
             return .{ .context = self };
         }
 
-        pub inline fn stat(inode: *Inode) !fs.File.Stat {
-            return fs.File.Stat.fromSystem(
-                try inode.statC(),
-            );
-        }
-
         fn getId(sqfs: *SquashFs, idx: u16) !u32 {
             var id: u32 = 0;
 
@@ -415,6 +413,12 @@ pub const SquashFs = struct {
             );
         }
 
+        pub inline fn stat(inode: *Inode) !fs.File.Stat {
+            return fs.File.Stat.fromSystem(
+                try inode.statC(),
+            );
+        }
+
         // Like `Inode.stat` but returns the OS native stat format
         pub fn statC(inode: *Inode) !os.Stat {
             var st = std.mem.zeroes(os.Stat);
@@ -422,9 +426,9 @@ pub const SquashFs = struct {
             st.mode = inode.internal.base.mode;
             st.nlink = @intCast(inode.internal.nlink);
 
-            st.atim.tv_sec = inode.internal.base.mtime;
-            st.ctim.tv_sec = inode.internal.base.mtime;
-            st.mtim.tv_sec = inode.internal.base.mtime;
+            st.atim.tv_sec = @intCast(inode.internal.base.mtime);
+            st.ctim.tv_sec = @intCast(inode.internal.base.mtime);
+            st.mtim.tv_sec = @intCast(inode.internal.base.mtime);
 
             switch (inode.kind) {
                 .file => {
@@ -443,7 +447,7 @@ pub const SquashFs = struct {
                 else => {},
             }
 
-            st.blksize = inode.parent.internal.sb.block_size;
+            st.blksize = @intCast(inode.parent.internal.sb.block_size);
 
             st.uid = @intCast(inode.parent.internal.uid);
             if (st.uid == 0) {
@@ -769,26 +773,14 @@ pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decomp
 }
 
 export fn sqfs_decompressor_get(kind: SquashFs.Compression) ?*const fn ([*]u8, usize, [*]u8, *usize) callconv(.C) c.sqfs_err {
-    switch (kind) {
-        .zlib => {
-            if (comptime build_options.enable_zlib) return algos.zig_zlib_decode;
-        },
-        .lzma => return null,
-        .xz => {
-            if (comptime build_options.enable_xz) return algos.zig_xz_decode;
-        },
-        .lzo => {
-            if (comptime build_options.enable_lzo) return algos.zig_lzo_decode;
-        },
-        .lz4 => {
-            if (comptime build_options.enable_lz4) return algos.zig_lz4_decode;
-        },
-        .zstd => {
-            if (comptime build_options.enable_zstd) return algos.zig_zstd_decode;
-        },
-    }
-
-    return null;
+    return switch (kind) {
+        .zlib => algos.getLibsquashfuseDecompressionFn(.zlib),
+        .lzma => algos.getLibsquashfuseDecompressionFn(.lzma),
+        .xz => algos.getLibsquashfuseDecompressionFn(.xz),
+        .lzo => algos.getLibsquashfuseDecompressionFn(.lzo),
+        .lz4 => algos.getLibsquashfuseDecompressionFn(.lz4),
+        .zstd => algos.getLibsquashfuseDecompressionFn(.zstd),
+    };
 }
 
 fn dirMdRead(
