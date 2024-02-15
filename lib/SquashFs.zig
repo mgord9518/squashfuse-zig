@@ -1124,7 +1124,7 @@ fn openDir(sqfs: *SquashFs, inode: *SquashFs.Inode, dir: *c.sqfs_dir, offset: os
     dir.cur.block = @intCast(inode.internal.xtra.dir.start_block + sqfs.internal.sb.directory_table_start);
     dir.cur.offset = inode.internal.xtra.dir.offset;
     dir.offset = 0;
-    dir.total = if (inode.internal.xtra.dir.dir_size <= 3) 0 else inode.internal.xtra.dir.dir_size - 3;
+    dir.total = @intCast(inode.internal.xtra.dir.dir_size -| 3);
 
     if (offset != 0) {
         //        try SquashFsErrorFromInt(
