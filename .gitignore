@@ -5,4 +5,4 @@ a.out
 zig-out
 zig-cache
 mnt
-perftest
+benchmark

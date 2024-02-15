@@ -282,10 +282,6 @@ pub fn main() !void {
     squash = Squash{ .image = sqfs, .file_tree = file_tree };
     defer sqfs.deinit();
 
-    var root_inode = squash.image.getRootInode();
-    var walker = try root_inode.walk(allocator);
-    defer walker.deinit();
-
     var extract_args_len: usize = 0;
     for (res.args.extract) |_| {
         extract_args_len += 1;
@@ -295,6 +291,8 @@ pub fn main() !void {
 
     // TODO: use basename of src if not `/`
     const dest = res.args.@"extract-dest" orelse "squashfs-root";
+
+    var root_inode = squash.image.getRootInode();
 
     if (res.args.extract != 0) {
         try extractArchive(
@@ -307,6 +305,9 @@ pub fn main() !void {
 
         return;
     }
+
+    var walker = try root_inode.walk(allocator);
+    defer walker.deinit();
 
     if (res.args.list != 0) {
         while (try walker.next()) |entry| {
@@ -423,8 +424,6 @@ const FuseOperations = struct {
     pub fn readLink(path: [:0]const u8, buf: []u8) fuse.MountError![]const u8 {
         var entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
         var inode = entry.inode();
-
-        std.debug.print("BUFLEN: {d}\n", .{buf.len});
 
         if (entry.kind != .sym_link) return fuse.MountError.InvalidArgument;
 
