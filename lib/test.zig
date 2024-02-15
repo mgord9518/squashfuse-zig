@@ -30,10 +30,14 @@ test "walk tree" {
     const allocator = std.testing.allocator;
 
     inline for (compression_algos) |algo| {
+        //std.debug.print("test algo: {s}\n", .{algo});
+
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
         var sqfs = try SquashFs.init(allocator, file_path, .{});
         defer sqfs.deinit();
+
+        //std.debug.print("test algo: {s}\n", .{algo});
 
         var root_inode = sqfs.getRootInode();
 

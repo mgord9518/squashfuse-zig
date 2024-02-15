@@ -244,6 +244,7 @@ pub fn main() !void {
                     error.InvalidFormat => "unknown file type, doesn't look like a SquashFS image",
                     error.FileNotFound => try std.fmt.allocPrint(allocator, "file `{s}` not found", .{arg}),
                     error.AccessDenied => "permission denied",
+                    error.IsDir => "attempted to open directory as SquashFS image",
                     else => return err,
                 };
 
@@ -328,12 +329,25 @@ pub fn main() !void {
     }
 
     // TODO: nicer error printing
-    try fuse.run(
+    fuse.run(
         allocator,
         args.items,
         FuseOperations,
         squash,
-    );
+    ) catch |err| {
+        const error_string = switch (err) {
+            error.NoMountPoint => "unsupported compression algorithm",
+            else => return err,
+        };
+
+        try stderr.print("{s}::{s} failed to read image: {s}\n", .{
+            red,
+            reset,
+            error_string,
+        });
+
+        std.os.exit(1);
+    };
 
     return;
 }

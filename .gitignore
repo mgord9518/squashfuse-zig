@@ -6,3 +6,4 @@ zig-out
 zig-cache
 mnt
 benchmark
+squashfs-root
