@@ -1,6 +1,7 @@
 *.a
 *.so
 *.o
+*.old
 a.out
 zig-out
 zig-cache

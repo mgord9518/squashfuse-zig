@@ -1,4 +1,4 @@
-const squashfuse = @import("lib/SquashFs.zig");
+const squashfuse = @import("lib/squashfuse.zig");
 
 pub const SquashFsError = squashfuse.SquashFsError;
 pub const InodeId = squashfuse.InodeId;

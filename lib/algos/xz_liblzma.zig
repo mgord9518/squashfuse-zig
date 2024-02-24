@@ -1,13 +1,13 @@
 const std = @import("std");
 const io = std.io;
-const squashfuse = @import("../SquashFs.zig");
+const squashfuse = @import("../squashfuse.zig");
 const DecompressError = squashfuse.DecompressError;
 
 extern fn lzma_stream_buffer_decode(
     memlemit: *u64,
     flags: u32,
     // TODO: set allocator
-    allocator: ?*anyopaque,
+    allocator: ?*LiblzmaAllocator,
     in: [*]const u8,
     in_pos: *usize,
     in_size: usize,
@@ -15,6 +15,12 @@ extern fn lzma_stream_buffer_decode(
     out_pos: *usize,
     out_size: usize,
 ) c_int;
+
+const LiblzmaAllocator = extern struct {
+    alloc: *const fn (o: ?*anyopaque, nmemb: usize, size: usize) callconv(.C) void,
+    free: *const fn (o: ?*anyopaque) callconv(.C) void,
+    o: ?*anyopaque = null,
+};
 
 pub fn xzDecode(
     allocator: std.mem.Allocator,

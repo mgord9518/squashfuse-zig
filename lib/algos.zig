@@ -3,7 +3,7 @@ pub const Algos = @This();
 const std = @import("std");
 const builtin = std.builtin;
 const build_options = @import("build_options");
-const squashfuse = @import("SquashFs.zig");
+const squashfuse = @import("squashfuse.zig");
 const SquashFs = squashfuse.SquashFs;
 
 const c = @cImport({

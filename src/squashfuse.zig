@@ -45,13 +45,6 @@ pub fn main() !void {
         \\<str>...
     );
 
-    var reset: []const u8 = "\x1b[0;0m";
-    var orange: []const u8 = "\x1b[0;33m";
-    var red: []const u8 = "\x1b[0;31m";
-    var light_blue: []const u8 = "\x1b[0;94m";
-    var light_green: []const u8 = "\x1b[0;92m";
-    var cyan: []const u8 = "\x1b[0;36m";
-
     const env_map = try std.process.getEnvMap(allocator);
 
     if (env_map.get("NO_COLOR")) |_| {
@@ -223,9 +216,10 @@ pub fn main() !void {
             };
         } else {
             // If not, just pass the option on to libfuse
-            const c_opt = try allocator.dupeZ(u8, opt);
-
-            try args.appendSlice(&[_][:0]const u8{ "-o", c_opt });
+            try args.appendSlice(&[_][:0]const u8{
+                "-o",
+                try allocator.dupeZ(u8, opt),
+            });
         }
     }
 
@@ -358,7 +352,10 @@ const FuseOperations = struct {
         var inode = entry.inode();
         inode.seekTo(offset) catch return fuse.MountError.Io;
 
-        const read_bytes = inode.read(buf) catch return fuse.MountError.Io;
+        const read_bytes = inode.read(buf) catch |err| {
+            std.debug.print("ERROR: {!}\n", .{err});
+            return fuse.MountError.Io;
+        };
 
         return read_bytes;
     }
@@ -496,6 +493,7 @@ fn extractArchive(
     opts: ExtractArchiveOptions,
 ) !void {
     var stdout = io.getStdOut().writer();
+    //var stderr = io.getStdErr().writer();
 
     var root_inode = sqfs.getRootInode();
 
@@ -515,7 +513,15 @@ fn extractArchive(
 
     if (real_src.len == 0) {
         const cwd = std.fs.cwd();
-        try cwd.makeDir(dest);
+        cwd.makeDir(
+            dest,
+        ) catch |err| {
+            switch (err) {
+                error.PathAlreadyExists => {},
+
+                else => return err,
+            }
+        };
     }
 
     var file_found = false;
@@ -570,3 +576,10 @@ fn extractArchive(
         std.debug.print("file ({s}) not found!\n", .{real_src});
     }
 }
+
+var reset: []const u8 = "\x1b[0;0m";
+var orange: []const u8 = "\x1b[0;33m";
+var red: []const u8 = "\x1b[0;31m";
+var light_blue: []const u8 = "\x1b[0;94m";
+var light_green: []const u8 = "\x1b[0;92m";
+var cyan: []const u8 = "\x1b[0;36m";

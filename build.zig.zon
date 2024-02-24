@@ -1,6 +1,6 @@
 .{
     .name = "squashfuse-zig",
-    .version = "0.0.50",
+    .version = "0.0.52",
 
     .paths = [][]const u8 {
         "build.zig",
@@ -45,10 +45,5 @@
             .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.4.5.tar.gz",
             .hash = "1220201cf75bb89dbd79d5c0e8f6778f781c27fcbe5ae0e4de12f64a357c229f92cd",
         },
-        .libatomic_ops = .{
-            .url = "https://github.com/ivmai/libatomic_ops/releases/download/v7.8.2/libatomic_ops-7.8.2.tar.gz",
-            .hash = "1220928c5fcc20fec165898af393589b904d526b03f34f9331a0d70c8b98bd595e37",
-        },
-
     },
 }

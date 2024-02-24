@@ -1,49 +1,50 @@
+const Table = @This();
+
 const std = @import("std");
 const os = std.os;
 
-const SquashFs = @import("SquashFs.zig").SquashFs;
+const squashfuse = @import("squashfuse.zig");
+const SquashFs = squashfuse.SquashFs;
+const Cache = @import("Cache.zig");
 
-const c = @cImport({
-    @cInclude("squashfuse.h");
-});
-
-const Table = @This();
-
-const sqfs_table = c.sqfs_table;
-
-internal: c.sqfs_table,
+allocator: std.mem.Allocator,
+each: usize,
+blocks: []u64,
 count: usize,
 
 // TODO: port table struct and move methods into it
 pub fn init(
     allocator: std.mem.Allocator,
-    fd: c.sqfs_fd_t,
-    start: c.sqfs_off_t,
+    fd: i32,
+    start: usize,
     each: usize,
     count: usize,
-) !sqfs_table {
-    var table: sqfs_table = undefined;
+) !Table {
+    var table: Table = undefined;
 
-    if (count == 0) return table;
+    if (count == 0) return Table{
+        .allocator = allocator,
+        .each = 0,
+        .blocks = &[_]u64{},
+        .count = 0,
+    };
 
     const nblocks = try std.math.divCeil(
         usize,
         each * count,
         SquashFs.metadata_size,
     );
-    const bread = nblocks * 8;
+    //const bread = nblocks * 8;
 
     table.each = each;
 
-    const blocks = try allocator.alloc(u64, nblocks);
-    table.blocks = blocks.ptr;
+    table.blocks = try allocator.alloc(u64, nblocks);
 
-    const blocks_buf: [*]u8 = @ptrCast(table.blocks);
-    if (try os.pread(fd, blocks_buf[0..bread], @intCast(start)) != bread) {
-        allocator.free(blocks);
-        table.blocks = null;
-        return error.Error;
-    }
+    try squashfuse.load(
+        fd,
+        table.blocks,
+        start,
+    );
 
     var i: usize = 0;
     while (i < nblocks) : (i += 1) {
@@ -53,16 +54,30 @@ pub fn init(
     return table;
 }
 
+pub fn get(
+    allocator: std.mem.Allocator,
+    table: *Table,
+    sqfs: *SquashFs,
+    idx: usize,
+    buf: [*]u8,
+) !void {
+    const pos = idx * table.each;
+    const bnum = pos / SquashFs.metadata_size;
+    const off = pos % SquashFs.metadata_size;
+
+    var bpos = table.blocks[bnum];
+
+    const block = try sqfs.mdCache(allocator, &bpos);
+
+    @memcpy(buf[0..table.each], block.data[off..][0..table.each]);
+
+    // TODO c.sqfs_block_dispose
+}
+
 pub fn deinit(
     allocator: std.mem.Allocator,
-    table: *sqfs_table,
-    count: usize,
+    table: *Table,
 ) void {
-    const nblocks = c.sqfs_divceil(
-        table.each * count,
-        SquashFs.metadata_size,
-    );
-
-    allocator.free(table.blocks[0..nblocks]);
-    table.blocks = null;
+    allocator.free(table.blocks);
+    //table.blocks = null;
 }

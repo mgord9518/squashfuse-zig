@@ -1,5 +1,5 @@
 const std = @import("std");
-const squashfuse = @import("../SquashFs.zig");
+const squashfuse = @import("../squashfuse.zig");
 const DecompressError = squashfuse.DecompressError;
 
 extern fn ZSTD_isError(usize) bool;

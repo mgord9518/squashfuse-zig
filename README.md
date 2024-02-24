@@ -1,15 +1,15 @@
 # squashfuse-zig
-Idomatic Zig bindings for squashfuse and new tools
+WIP SquashFS implementation in Zig, modeled from squashfuse
 
 My main goals for this project are as follows:
  * Make library usage as similar to Zig's stdlib as possible
  * Performant; choose the best compression implementations by default (this
    is already done using libdeflate in place of zlib)
  * Fully-compatible with existing squashfuse tools
- * Keep code as clean as possible
+ * Keep code as clean as possible (whew, yeah we're not there yet)
  * Iteratively re-implement squashfuse functionality in Zig, so eventually this
-   should be a complete re-implementation. A few functions have been ported
-   but the vast majority is still just bindings
+   should be a complete re-implementation. Most functions have been ported
+   but a few are still bindings or rely on squashfuse headers
 
 With some very basic benchmarking, extracting a zlib-compressed AppImage
 (FreeCAD, the largest AppImage I've been able to find so far), takes 3.1
@@ -24,6 +24,7 @@ using libdeflate, but performance by default is important. I'd like to compare
 it to the actual squashfuse's `squashfuse_extract` program to see how it
 compares.
 
+TODO: update this example
 Importing example:
 ```zig
 const std = @import("std");
