@@ -63,7 +63,7 @@ pub const SquashFs = struct {
 
     id_table: Table,
     frag_table: Table,
-    export_table: Table,
+    export_table: ?Table,
     xattr_id_table: Table,
 
     pub const magic: [4]u8 = "hsqs".*;
@@ -247,21 +247,11 @@ pub const SquashFs = struct {
     }
 
     pub fn deinit(sqfs: *SquashFs) void {
-        Table.deinit(
-            sqfs.allocator,
-            &sqfs.id_table,
-        );
+        sqfs.id_table.deinit();
+        sqfs.frag_table.deinit();
 
-        Table.deinit(
-            sqfs.allocator,
-            &sqfs.frag_table,
-        );
-
-        if (sqfs.internal.sb.lookup_table_start != SquashFs.invalid_block) {
-            Table.deinit(
-                sqfs.allocator,
-                &sqfs.export_table,
-            );
+        if (sqfs.export_table) |*export_table| {
+            export_table.deinit();
         }
 
         // Deinit caches
@@ -504,7 +494,7 @@ pub const SquashFs = struct {
     ) !*Cache.Block {
         var entry = Cache.getCache(
             allocator,
-            @ptrCast(&sqfs.internal.md_cache),
+            @ptrCast(@alignCast(sqfs.internal.md_cache)),
             @intCast(pos.*),
         );
 
@@ -548,7 +538,7 @@ pub const SquashFs = struct {
             );
 
             block = try sqfs.dataCache(
-                @ptrCast(&sqfs.internal.frag_cache),
+                @ptrCast(@alignCast(sqfs.internal.frag_cache)),
                 @intCast(frag.start_block),
                 frag.size,
             );
@@ -1204,32 +1194,14 @@ export fn sqfs_decompressor_get(kind: SquashFs.Compression) ?*const fn ([*]u8, u
     };
 }
 
-const sqfs_cache_entry_hdr = extern struct {
-    valid: bool,
-    idx: c.sqfs_cache_idx,
-};
-
-fn cacheEntryValid(e: *c.sqfs_block_cache_entry) bool {
-    var hdr: [*]sqfs_cache_entry_hdr = @ptrCast(@alignCast(e));
-    hdr -= 1;
-
-    return hdr[0].valid;
-}
-
 fn dataBlockRead(
     allocator: std.mem.Allocator,
     sqfs: *SquashFs,
     pos: usize,
     hdr_le: u32,
 ) !*Cache.Block {
-    //var compressed = false;
-    //var size: u32 = 0;
-
     const size = hdr_le & ~@as(u32, SquashFs.compressed_bit_block);
-    //
     const compressed = hdr_le & SquashFs.compressed_bit_block == 0;
-
-    //c.sqfs_data_header(hdr, &compressed, &size);
 
     return blockRead(
         allocator,

@@ -1,33 +1,53 @@
+pub const Cache = @This();
+
 const std = @import("std");
 const squashfuse = @import("squashfuse.zig");
 const SquashFs = squashfuse.SquashFs;
 const assert = std.debug.assert;
 
-pub const Cache = @This();
+buf: [*]u8,
 
-const c = @cImport({
-    @cInclude("squashfuse.h");
-});
+dispose: Dispose,
 
-const Internal = extern struct {
-    buf: [*]u8,
+size: usize,
+count: usize,
+next: usize,
 
-    dispose: c.sqfs_cache_dispose,
-
+pub fn init(
+    allocator: std.mem.Allocator,
     size: usize,
     count: usize,
-    next: usize,
+    dispose: Dispose,
+) !*Cache {
+    const cache = try allocator.create(Cache);
 
-    fn header(cache: *Internal, i: usize) *BlockCacheEntry.Header {
-        return @ptrCast(@alignCast(cache.buf + i * cache.size));
-    }
+    cache.* = .{
+        .size = size + @sizeOf(BlockCacheEntry.Header),
+        .count = count,
+        .dispose = dispose,
+        .next = 0,
+        .buf = undefined,
+    };
 
-    fn entry(cache: *Internal, i: usize) ?*anyopaque {
-        return @ptrFromInt(
-            @intFromPtr(cache.header(i)) + @sizeOf(BlockCacheEntry.Header),
-        );
-    }
-};
+    const buf = try allocator.alloc(u8, count * cache.size);
+    @memset(buf, 0);
+
+    cache.buf = buf.ptr;
+
+    return cache;
+}
+
+pub fn header(cache: *Cache, i: usize) *BlockCacheEntry.Header {
+    return @ptrCast(@alignCast(cache.buf + i * cache.size));
+}
+
+pub fn entry(cache: *Cache, i: usize) ?*anyopaque {
+    return @ptrFromInt(
+        @intFromPtr(cache.header(i)) + @sizeOf(BlockCacheEntry.Header),
+    );
+}
+
+pub const Dispose = *const fn (data: ?*anyopaque) callconv(.C) void;
 
 // sqfs_block
 pub const Block = extern struct {
@@ -50,20 +70,13 @@ pub const BlockCacheEntry = extern struct {
 
     pub const Header = extern struct {
         valid: bool,
-        idx: c.sqfs_cache_idx,
-
-        pub fn isValid(entry: *anyopaque) bool {
-            var header: [*]Header = @ptrCast(@alignCast(entry));
-            header -= 1;
-
-            return header[0].valid;
-        }
+        idx: u64,
     };
 
     pub fn init(
         allocator: std.mem.Allocator,
         count: usize,
-    ) !*Internal {
+    ) !*Cache {
         return try Cache.init(
             allocator,
             @sizeOf(BlockCacheEntry),
@@ -72,33 +85,35 @@ pub const BlockCacheEntry = extern struct {
         );
     }
 
-    pub fn isValid(entry: *BlockCacheEntry) bool {
-        var hdr: [*]Header = @ptrCast(@alignCast(entry));
+    pub fn header(e: *BlockCacheEntry) *Header {
+        var hdr: [*]Header = @ptrCast(@alignCast(e));
         hdr -= 1;
 
-        return hdr[0].valid;
+        return @ptrCast(hdr);
     }
 
-    pub fn markValid(entry: *BlockCacheEntry) void {
-        var hdr: [*]Header = @ptrCast(entry);
-        hdr -= 1;
+    pub fn isValid(e: *BlockCacheEntry) bool {
+        return e.header().valid;
+    }
 
-        if (hdr[0].valid) unreachable;
+    pub fn markValid(e: *BlockCacheEntry) void {
+        var hdr = e.header();
 
-        hdr[0].valid = true;
+        if (hdr.valid) unreachable;
+
+        hdr.valid = true;
     }
 };
 
 // sqfs_cache_get
 pub fn getCache(
     allocator: std.mem.Allocator,
-    cache: **Internal,
-    idx: c.sqfs_cache_idx,
+    ch: *Cache,
+    idx: u64,
 ) *BlockCacheEntry {
     _ = allocator;
 
     var i: usize = 0;
-    var ch: *Internal = @ptrCast(@alignCast(cache.*));
 
     while (i < ch.count) : (i += 1) {
         const hdr = ch.header(i);
@@ -117,7 +132,7 @@ pub fn getCache(
 
     var hdr = ch.header(i);
     if (hdr.valid) {
-        ch.dispose.?(@ptrFromInt(@intFromPtr(hdr) + @sizeOf(BlockCacheEntry.Header)));
+        ch.dispose(@ptrFromInt(@intFromPtr(hdr) + @sizeOf(BlockCacheEntry.Header)));
         hdr.valid = false;
     }
 
@@ -126,20 +141,25 @@ pub fn getCache(
 }
 
 pub const BlockIdx = struct {
-    pub fn init(allocator: std.mem.Allocator) !*Internal {
+    pub fn init(allocator: std.mem.Allocator) !*Cache {
         return try Cache.init(
             allocator,
-            @sizeOf(**c.sqfs_blockidx_entry),
+            @sizeOf(**BlockIdx.Entry),
             SquashFs.meta_slots,
             &dispose,
             //  @ptrCast(&noop),
         );
     }
 
-    export fn dispose(data: ?*anyopaque) void {
-        const entry: *BlockCacheEntry = @ptrCast(@alignCast(data.?));
+    pub const Entry = extern struct {
+        data_block: u64,
+        md_block: u32,
+    };
+
+    export fn dispose(data: ?*anyopaque) callconv(.C) void {
+        const e: *BlockCacheEntry = @ptrCast(@alignCast(data.?));
         //c.sqfs_block_dispose(@ptrCast(entry.block));
-        _ = entry;
+        _ = e;
     }
 
     // TODO
@@ -167,26 +187,3 @@ pub const BlockIdx = struct {
 };
 
 fn noop() void {}
-
-pub fn init(
-    allocator: std.mem.Allocator,
-    size: usize,
-    count: usize,
-    dispose: c.sqfs_cache_dispose,
-) !*Internal {
-    const temp = try allocator.create(Internal);
-
-    temp.* = .{
-        .size = size + @sizeOf(BlockCacheEntry.Header),
-        .count = count,
-        .dispose = dispose,
-        .next = 0,
-        .buf = undefined,
-    };
-
-    const buf = try allocator.alloc(u8, count * temp.size);
-    @memset(buf, 0);
-    temp.buf = buf.ptr;
-
-    return @ptrCast(temp);
-}

@@ -10,9 +10,7 @@ const Cache = @import("Cache.zig");
 allocator: std.mem.Allocator,
 each: usize,
 blocks: []u64,
-count: usize,
 
-// TODO: port table struct and move methods into it
 pub fn init(
     allocator: std.mem.Allocator,
     fd: i32,
@@ -20,25 +18,23 @@ pub fn init(
     each: usize,
     count: usize,
 ) !Table {
-    var table: Table = undefined;
-
     if (count == 0) return Table{
         .allocator = allocator,
         .each = 0,
         .blocks = &[_]u64{},
-        .count = 0,
     };
 
-    const nblocks = try std.math.divCeil(
+    const block_count = try std.math.divCeil(
         usize,
         each * count,
         SquashFs.metadata_size,
     );
-    //const bread = nblocks * 8;
 
-    table.each = each;
-
-    table.blocks = try allocator.alloc(u64, nblocks);
+    const table = Table{
+        .allocator = allocator,
+        .each = each,
+        .blocks = try allocator.alloc(u64, block_count),
+    };
 
     try squashfuse.load(
         fd,
@@ -46,9 +42,8 @@ pub fn init(
         start,
     );
 
-    var i: usize = 0;
-    while (i < nblocks) : (i += 1) {
-        table.blocks[i] = std.mem.littleToNative(u64, table.blocks[i]);
+    for (table.blocks) |*block| {
+        block.* = std.mem.littleToNative(u64, block.*);
     }
 
     return table;
@@ -75,9 +70,8 @@ pub fn get(
 }
 
 pub fn deinit(
-    allocator: std.mem.Allocator,
     table: *Table,
 ) void {
-    allocator.free(table.blocks);
+    table.allocator.free(table.blocks);
     //table.blocks = null;
 }
