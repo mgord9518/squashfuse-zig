@@ -62,7 +62,8 @@ pub fn get(
 
     var bpos = table.blocks[bnum];
 
-    const block = try sqfs.mdCache(allocator, &bpos);
+    // TODO: Update functions to u64
+    const block = try sqfs.mdCache(allocator, @ptrCast(&bpos));
 
     @memcpy(buf[0..table.each], block.data[off..][0..table.each]);
 

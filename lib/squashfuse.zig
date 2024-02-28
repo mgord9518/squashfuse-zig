@@ -544,7 +544,7 @@ pub const SquashFs = struct {
             );
 
             offset.* = inode.internal.xtra.reg.frag_off;
-            size.* = inode.internal.xtra.reg.file_size % sqfs.internal.sb.block_size;
+            size.* = @intCast(inode.internal.xtra.reg.file_size % sqfs.internal.sb.block_size);
 
             return block;
         }
@@ -1005,7 +1005,7 @@ pub const SquashFs = struct {
         pub fn fromInodeId(id: u64, base: u64) MdCursor {
             return .{
                 .block = @intCast((id >> 16) + base),
-                .offset = id & 0xffff,
+                .offset = @intCast(id & 0xffff),
             };
         }
     };
@@ -1124,7 +1124,7 @@ fn readRange(
 
             data_off = 0;
             if (bl.input_size == 0) {
-                data_size = file_size - bl.pos;
+                data_size = @intCast(file_size - bl.pos);
 
                 if (data_size > block_size) data_size = block_size;
             } else {
