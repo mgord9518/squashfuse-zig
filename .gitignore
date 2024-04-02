@@ -2,6 +2,7 @@
 *.so
 *.o
 *.old
+*.bak
 a.out
 zig-out
 zig-cache

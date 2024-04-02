@@ -366,8 +366,7 @@ pub const SquashFs = struct {
         sqfs: *SquashFs,
         id: u64,
     ) !Inode.Internal {
-        //var inode = std.mem.zeroes(c.sqfs_inode);
-        //var inode: c.sqfs_inode = @bitCast(Inode.Internal{
+        //var inode = std.mem.zeroes(Inode.Internal);
         var inode = Inode.Internal{
             .base = std.mem.zeroes(SquashFs.SuperBlock.InodeBase),
             .nlink = 0,
@@ -419,6 +418,11 @@ pub const SquashFs = struct {
                     .frag_idx = x.fragment,
                     .frag_off = x.offset,
                 } };
+
+                //                inode.xtra.reg.start_block = x.start_block;
+                //                inode.xtra.reg.file_size = x.file_size;
+                //                inode.xtra.reg.frag_idx = x.fragment;
+                //                inode.xtra.reg.frag_off = x.offset;
             },
             .l_file => {
                 const x = try inodeType(.l_file, allocator, sqfs, &inode);
@@ -442,16 +446,31 @@ pub const SquashFs = struct {
                     .idx_count = 0,
                     .parent_inode = x.parent_inode,
                 } };
+
+                //                inode.xtra.dir.start_block = x.start_block;
+                //                inode.xtra.dir.offset = x.offset;
+                //                inode.xtra.dir.dir_size = x.file_size;
+                //                inode.xtra.dir.idx_count = 0;
+                //                inode.xtra.dir.parent_inode = x.parent_inode;
             },
             .l_directory => {
                 const x = try inodeType(.l_directory, allocator, sqfs, &inode);
 
                 inode.nlink = @intCast(x.nlink);
-                inode.xtra.dir.start_block = x.start_block;
-                inode.xtra.dir.offset = x.offset;
-                inode.xtra.dir.dir_size = x.file_size;
-                inode.xtra.dir.idx_count = 0;
-                inode.xtra.dir.parent_inode = x.parent_inode;
+
+                inode.xtra = .{ .dir = .{
+                    .start_block = x.start_block,
+                    .offset = x.offset,
+                    .dir_size = x.file_size,
+                    .idx_count = 0,
+                    .parent_inode = x.parent_inode,
+                } };
+
+                //                inode.xtra.dir.start_block = x.start_block;
+                //                inode.xtra.dir.offset = x.offset;
+                //                inode.xtra.dir.dir_size = x.file_size;
+                //                inode.xtra.dir.idx_count = 0;
+                //                inode.xtra.dir.parent_inode = x.parent_inode;
             },
             .sym_link, .l_sym_link => {
                 const x = try inodeType(.sym_link, allocator, sqfs, &inode);
@@ -459,6 +478,8 @@ pub const SquashFs = struct {
                 inode.nlink = @intCast(x.nlink);
 
                 inode.xtra = .{ .symlink_size = x.symlink_size };
+
+                //inode.xtra.symlink_size = x.symlink_size;
 
                 if (kind == .l_sym_link) {
                     cur = @bitCast(inode.next);
@@ -475,13 +496,20 @@ pub const SquashFs = struct {
                     .major = @intCast((x.rdev >> 8) & 0xfff),
                     .minor = @intCast((x.rdev & 0xff) | (x.rdev >> 12) & 0xfff00),
                 } };
+
+                //                inode.xtra.dev.major = @intCast((x.rdev >> 8) & 0xfff);
+                //                inode.xtra.dev.minor = @intCast((x.rdev & 0xff) | (x.rdev >> 12) & 0xfff00);
             },
             .l_block_device, .l_character_device => {
                 const x = try inodeType(.l_block_device, allocator, sqfs, &inode);
 
                 inode.nlink = @intCast(x.nlink);
-                inode.xtra.dev.major = @intCast((x.rdev >> 8) & 0xfff);
-                inode.xtra.dev.minor = @intCast((x.rdev & 0xff) | (x.rdev >> 12) & 0xfff00);
+
+                inode.xtra = .{ .dev = .{
+                    .major = @intCast((x.rdev >> 8) & 0xfff),
+                    .minor = @intCast((x.rdev & 0xff) | (x.rdev >> 12) & 0xfff00),
+                } };
+
                 inode.xattr = x.xattr;
             },
             .unix_domain_socket, .named_pipe => {
@@ -583,19 +611,19 @@ pub const SquashFs = struct {
             xattr: u32,
             next: SquashFs.MdCursor,
 
-            xtra: extern union {
-                dev: extern struct {
+            xtra: union {
+                dev: struct {
                     major: u32,
                     minor: u32,
                 },
                 symlink_size: usize,
-                reg: extern struct {
+                reg: struct {
                     start_block: u64,
                     file_size: u64,
                     frag_idx: u32,
                     frag_off: u32,
                 },
-                dir: extern struct {
+                dir: struct {
                     start_block: u32,
                     offset: u16,
                     dir_size: u32,
@@ -1079,45 +1107,6 @@ pub const SquashFs = struct {
             l_named_pipe = 13,
             l_unix_domain_socket = 14,
         };
-
-        pub const BlockList = extern struct {
-            sqfs: *SquashFs,
-            remain: usize,
-            cur: MdCursor,
-            started: bool,
-
-            pos: u64,
-
-            block: u64,
-            header: u32,
-            input_size: u32,
-
-            pub fn next(bl: *BlockList, allocator: std.mem.Allocator) !void {
-                if (bl.remain == 0) {
-                    // TODO: better errors
-                    return error.NoRemain;
-                }
-
-                bl.remain -= 1;
-
-                try mdRead(
-                    allocator,
-                    bl.sqfs,
-                    &bl.cur,
-                    @as([*]u8, @ptrCast(&bl.header))[0..4],
-                );
-
-                bl.header = littleToNative(bl.header);
-
-                bl.block += bl.input_size;
-
-                if (bl.started) {
-                    bl.pos += bl.sqfs.super_block.block_size;
-                }
-
-                bl.started = true;
-            }
-        };
     };
 
     pub const Dir = @import("Dir.zig");
@@ -1208,11 +1197,11 @@ fn readRange(
         return 0;
     }
 
-    var bl: SquashFs.File.BlockList = undefined;
+    var bl: c.sqfs_blocklist = undefined;
     try SquashFsErrorFromInt(c.sqfs_blockidx_blocklist(
         &sqfs.internal,
         @ptrCast(&inode.internal),
-        @ptrCast(&bl),
+        &bl,
         @intCast(start),
     ));
 
@@ -1242,10 +1231,7 @@ fn readRange(
                 &data_size,
             );
         } else {
-            try SquashFsErrorFromInt(c.sqfs_blocklist_next(@ptrCast(&bl)));
-
-            // TODO
-            //try bl.next(std.heap.page_allocator);
+            try SquashFsErrorFromInt(c.sqfs_blocklist_next(&bl));
 
             if (bl.pos + block_size <= start) continue;
 

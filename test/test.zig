@@ -2,7 +2,8 @@
 // algos
 
 const std = @import("std");
-const os = std.os;
+const posix = std.posix;
+const fs = std.fs;
 const expect = std.testing.expect;
 const squashfuse = @import("squashfuse");
 
@@ -11,10 +12,10 @@ pub const InodeId = squashfuse.InodeId;
 pub const SquashFs = squashfuse.SquashFs;
 
 const compression_algos = &[_][]const u8{
-    //    "xz",
-    //   "zlib",
-    //  "zstd",
-    // "lzo",
+    "xz",
+    "zlib",
+    "zstd",
+    "lzo",
     "lz4",
 };
 
@@ -30,14 +31,10 @@ test "walk tree" {
     const allocator = std.testing.allocator;
 
     inline for (compression_algos) |algo| {
-        //std.debug.print("test algo: {s}\n", .{algo});
-
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
         var sqfs = try SquashFs.init(allocator, file_path, .{});
         defer sqfs.deinit();
-
-        //std.debug.print("test algo: {s}\n", .{algo});
 
         var root_inode = sqfs.getRootInode();
 
@@ -45,10 +42,8 @@ test "walk tree" {
         defer walker.deinit();
 
         var idx: usize = 0;
-        while (try walker.next()) |entry| {
+        while (try walker.next()) |entry| : (idx += 1) {
             try expect(std.mem.eql(u8, entry.path, file_tree[idx]));
-
-            idx += 1;
         }
 
         // Make sure the entire list has been hit
@@ -135,7 +130,7 @@ test "read link" {
                 continue;
             }
 
-            var buf: [os.PATH_MAX]u8 = undefined;
+            var buf: [fs.MAX_PATH_BYTES]u8 = undefined;
             var inode = entry.inode();
 
             const link_target = try inode.readLink(&buf);
@@ -149,6 +144,7 @@ test "read link" {
     }
 }
 
+// TODO: autogenerate this
 // The file structure of the test image filetree
 const file_tree = &[_][]const u8{
     "1",
@@ -163,31 +159,4 @@ const file_tree = &[_][]const u8{
     "symlink",
 };
 
-const text_contents =
-    \\test text file
-    \\ABCDEFGHIJKLMNOPQRSTUVWXYZ
-    \\more stuff
-    \\very compressable
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-    \\except not here
-    \\jfkdjsl;fajldjslkfeanwlrqjoi90325802nfnvsf;hdsgpfgia-12=4fjdksljflsdbffkashcjlf
-    \\121039hkfjdsbfls;jfdsjewjorweptjgf04385-43jflmsfd lnnfdjlskflds;fds[\fdsjdlfsjd
-    \\JFKDJSL;FAJLDJSLKFEANWLRQJOI90325802NFNVSF;HDSGPFGIA-12=4FJDKSLJFLSDBFFKASHCJLF
-    \\121039HKFJDSBFLS;JFDSJEWJORWEPTJGF04385-43JFLMSFD LNNFDJLSKFLDS;FDS[\FDSJDLFSJD
-    \\
-;
+const text_contents = @embedFile("tree/2/text");

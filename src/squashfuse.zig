@@ -1,6 +1,7 @@
 const std = @import("std");
 const fmt = std.fmt;
 const io = std.io;
+const posix = std.posix;
 
 const fuse = @import("fuse");
 const clap = @import("clap");
@@ -70,7 +71,7 @@ pub fn main() !void {
             error_string,
         });
 
-        std.os.exit(1);
+        std.posix.exit(1);
     };
 
     defer res.deinit();
@@ -212,7 +213,7 @@ pub fn main() !void {
                     num_str,
                 });
 
-                std.os.exit(1);
+                std.posix.exit(1);
             };
         } else {
             // If not, just pass the option on to libfuse
@@ -248,7 +249,7 @@ pub fn main() !void {
                     error_string,
                 });
 
-                std.os.exit(1);
+                posix.exit(1);
             };
 
             continue;
@@ -256,7 +257,7 @@ pub fn main() !void {
 
         if (idx > 1) {
             try stderr.print("{s}::{s} failed to parse args: too many arguments\n", .{ red, reset });
-            std.os.exit(1);
+            posix.exit(1);
         }
 
         // Pass further positional args to FUSE
@@ -340,7 +341,7 @@ pub fn main() !void {
             error_string,
         });
 
-        std.os.exit(1);
+        posix.exit(1);
     };
 
     return;
@@ -461,7 +462,7 @@ const FuseOperations = struct {
         _ = buf;
     }
 
-    pub fn getAttr(path: [:0]const u8, _: *fuse.FileInfo) fuse.MountError!std.os.Stat {
+    pub fn getAttr(path: [:0]const u8, _: *fuse.FileInfo) fuse.MountError!posix.Stat {
         // Load from the root inode
         if (std.mem.eql(u8, path, "/")) {
             var inode = squash.image.getRootInode();
@@ -551,7 +552,7 @@ fn extractArchive(
 
         file_found = true;
 
-        var path_buf: [std.os.PATH_MAX]u8 = undefined;
+        var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const prefixed_dest = switch (real_src.len) {
             0 => try fmt.bufPrint(&path_buf, "{s}/{s}", .{
                 dest,

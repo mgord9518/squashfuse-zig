@@ -411,7 +411,7 @@ pub fn build(b: *std.Build) !void {
     // me assume that xz is being built correctly and the tests are somehow
     // misconfigured. Test fails with not being able to obtain the root inode
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "lib/test.zig" },
+        .root_source_file = .{ .path = "test/test.zig" },
         .target = target,
         .optimize = optimize,
         .strip = strip,
