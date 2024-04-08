@@ -99,4 +99,4 @@ mv zig-out/bin/squashfuse "squashfuse_lzo$prefix.$ARCH"
 #    -Denable-lzo=false \
 #    -Duse-system-fuse=false
 
-mv zig-out/bin/squashfuse "squashfuse_xz$prefix.$ARCH"
+#mv zig-out/bin/squashfuse "squashfuse_xz$prefix.$ARCH"
