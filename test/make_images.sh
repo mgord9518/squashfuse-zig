@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Permissions appear to get screwed up in CI
+chmod 400 tree/perm_400
+chmod 644 tree/perm_644
+chmod 777 tree/perm_777
+
 for comp in 'gzip' 'xz' 'zstd' 'lz4' 'lzo'; do
     name="$comp"
 
