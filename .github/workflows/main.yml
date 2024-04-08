@@ -16,6 +16,9 @@ jobs:
         sudo apt update
         sudo apt install squashfs-tools
 
+      # TODO: possibly remove GLibC? I'll have to do some testing and see if
+      # there are any large benefits to keeping it, because it's now only being
+      # used for the compression libraries
     - name: Build (Musl libc, static, x86_64)
       run: ARCH=x86_64 OS=linux LIBC=musl ./build.sh
 
@@ -34,14 +37,23 @@ jobs:
     - name: Build (GLibC 2.16, x86)
       run: ARCH=x86 OS=linux LIBC=gnu.2.16 ./build.sh
 
-    # TODO: ARM32 builds
+    - name: Build (Musl libc, static, arm)
+      run: ARCH=arm OS=linux LIBC=musleabi ./build.sh
+
+    - name: Build (GLibC 2.16, arm)
+      run: ARCH=arm OS=linux LIBC=gnueabi.2.16 ./build.sh
+
+    - name: Build (Musl libc, static, riscv64)
+      run: ARCH=riscv64 OS=linux LIBC=musl ./build.sh
+
+        # TODO: riscv64 GLibC and riscv32
+        #    - name: Build (GLibC 2.16, riscv64)
+        #      run: ARCH=riscv64 OS=linux LIBC=gnu.2.16 ./build.sh
 
     - name: Build test images
       run: |
         cd test
         ./make_images.sh
-        # see why test isn't working
-        ls -l tree
         cd ..
 
     - name: Test
