@@ -88,15 +88,15 @@ zig build \
 mv zig-out/bin/squashfuse "squashfuse_lzo$prefix.$ARCH"
 
 # XZ
-zig build \
-    -Doptimize="$OPTIMIZE" \
-    -Dtarget="$target" \
-    -Dstrip=true \
-    -Denable-zlib=false \
-    -Denable-zstd=false \
-    -Denable-lz4=false \
-    -Denable-xz=true \
-    -Denable-lzo=false \
-    -Duse-system-fuse=false
+#zig build \
+#    -Doptimize="$OPTIMIZE" \
+#    -Dtarget="$target" \
+#    -Dstrip=true \
+#    -Denable-zlib=false \
+#    -Denable-zstd=false \
+#    -Denable-lz4=false \
+#    -Denable-xz=true \
+#    -Denable-lzo=false \
+#    -Duse-system-fuse=false
 
 mv zig-out/bin/squashfuse "squashfuse_xz$prefix.$ARCH"
