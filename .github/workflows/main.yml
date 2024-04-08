@@ -40,6 +40,8 @@ jobs:
       run: |
         cd test
         ./make_images.sh
+        # see why test isn't working
+        ls -l tree
         cd ..
 
     - name: Test

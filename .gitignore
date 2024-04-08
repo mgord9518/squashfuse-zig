@@ -4,6 +4,7 @@
 *.old
 *.bak
 a.out
+*.sqfs
 zig-out
 zig-cache
 mnt
