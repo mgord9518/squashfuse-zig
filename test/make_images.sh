@@ -5,9 +5,7 @@ for comp in 'gzip' 'xz' 'zstd' 'lz4' 'lzo'; do
 
     # For some reason mksquashfs calls SquashFS zlib compression gzip despite
     # not actually being in a gzip container
-    if [ "$name" = "gzip" ]; then
-        name="zlib"
-    fi
+    [ "$name" = "gzip" ] && name="zlib"
 
     mksquashfs "tree/" \
         "tree_$name.sqfs" \

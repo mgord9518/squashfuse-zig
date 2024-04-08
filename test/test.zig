@@ -51,6 +51,34 @@ test "walk tree" {
     }
 }
 
+test "file permissions" {
+    const allocator = std.testing.allocator;
+
+    inline for (compression_algos) |algo| {
+        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
+
+        var sqfs = try SquashFs.init(allocator, file_path, .{});
+        defer sqfs.deinit();
+
+        var root_inode = sqfs.getRootInode();
+
+        var walker = try root_inode.walk(allocator);
+        defer walker.deinit();
+
+        var idx: usize = 0;
+        while (try walker.next()) |entry| : (idx += 1) {
+            if (entry.path.len < 7 or !std.mem.eql(u8, entry.path[0..5], "perm_")) continue;
+
+            var inode = entry.inode();
+
+            const trunc_mode: u9 = @truncate((try inode.stat()).mode);
+            const goal_mode = try std.fmt.parseInt(u9, entry.path[5..], 8);
+
+            try expect(trunc_mode == goal_mode);
+        }
+    }
+}
+
 fn testRead(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
     var file_tree_hashmap = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
     defer file_tree_hashmap.deinit();
@@ -156,6 +184,9 @@ const file_tree = &[_][]const u8{
     // Very long filename
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     "broken_symlink",
+    "perm_400",
+    "perm_644",
+    "perm_777",
     "symlink",
 };
 

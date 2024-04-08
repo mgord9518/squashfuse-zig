@@ -236,9 +236,7 @@ pub const BlockIdx = struct {
 
         bl.* = try SquashFs.File.BlockList.init(sqfs, inode);
 
-        var block: usize = start / sqfs.super_block.block_size;
-
-        block = start / sqfs.super_block.block_size;
+        const block: usize = @intCast(start / sqfs.super_block.block_size);
         if (block > bl.remain) {
             bl.remain = 0;
             return;
@@ -255,7 +253,7 @@ pub const BlockIdx = struct {
 
         idx = inode.internal.base.inode_number + 1;
 
-        bp = @ptrCast(getCache(sqfs.allocator, @ptrCast(@alignCast(sqfs.internal.blockidx)), idx));
+        bp = @ptrCast(getCache(sqfs.allocator, @ptrCast(@alignCast(sqfs.blockidx)), idx));
         //if (c.sqfs_cache_entry_valid(&sqfs.internal.blockidx, @ptrCast(bp)) != 0) {
         if (@as(*BlockCacheEntry, @ptrCast(bp)).isValid()) {
             blockidx = bp.*;

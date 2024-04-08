@@ -183,11 +183,11 @@ pub fn main() !void {
         try stderr.print(
             \\
             \\{s}enviornment variables{s}:
-            \\  {s}NO_COLOR{s}: disable color
+            \\  {s}NO_COLOR{1s}: disable color
             \\
-            \\{s}this build can decompress{s}:
+            \\{0s}this build can decompress{1s}:
             \\
-        , .{ orange, reset, cyan, reset, orange, reset });
+        , .{ orange, reset, cyan });
 
         inline for (std.meta.fields(SquashFs.Compression)) |algo| {
             try stderr.print(

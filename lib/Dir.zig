@@ -6,24 +6,26 @@ const assert = std.debug.assert;
 
 pub const Dir = @This();
 
-const c = @cImport({
-    @cInclude("squashfuse.h");
-    @cInclude("dir.h");
-});
-
 cur: SquashFs.MdCursor,
-offset: c.sqfs_off_t,
-total: c.sqfs_off_t,
+offset: u64,
+total: u64,
 header: Header,
 
 pub const Entry = extern struct {
-    inode: c.sqfs_inode_id,
-    inode_number: c.sqfs_inode_num,
+    inode: u64,
+    inode_number: u32,
     kind: c_int,
     name: [*]u8,
     name_len: usize,
-    offset: c.sqfs_off_t,
-    next_offset: c.sqfs_off_t,
+    offset: u64,
+    next_offset: u64,
+};
+
+const InternalEntry = packed struct {
+    offset: u16,
+    inode_number: u16,
+    kind: u16,
+    size: u16,
 };
 
 pub const Header = extern struct {
@@ -37,7 +39,7 @@ pub fn open(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
 
     var dir = std.mem.zeroes(Dir);
 
-    dir.cur.block = @intCast(inode.internal.xtra.dir.start_block + sqfs.internal.sb.directory_table_start);
+    dir.cur.block = @intCast(inode.internal.xtra.dir.start_block + sqfs.super_block.directory_table_start);
     dir.cur.offset = inode.internal.xtra.dir.offset;
     dir.offset = 0;
     dir.total = @intCast(inode.internal.xtra.dir.dir_size -| 3);
@@ -51,7 +53,7 @@ pub fn dirNext(
     dir: *SquashFs.Dir,
     entry: *SquashFs.Dir.Entry,
 ) !bool {
-    var e: c.squashfs_dir_entry = undefined;
+    var e: InternalEntry = undefined;
 
     entry.offset = dir.offset;
 
@@ -74,7 +76,7 @@ pub fn dirNext(
 
     dir.header.count -= 1;
 
-    entry.kind = e.type;
+    entry.kind = e.kind;
     entry.name_len = e.size + 1;
     entry.inode = (@as(u64, @intCast(dir.header.start_block)) << 16) + e.offset;
     entry.inode_number = dir.header.inode_number + e.inode_number;
@@ -93,8 +95,6 @@ fn dirMdRead(
     buf: []u8,
 ) !void {
     dir.offset += @intCast(buf.len);
-
-    //try SquashFsErrorFromInt(c.sqfs_md_read(sqfs, &dir.cur, buf.ptr, buf.len));
 
     try squashfuse.mdRead(allocator, sqfs, &dir.cur, buf);
 }
