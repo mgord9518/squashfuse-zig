@@ -350,30 +350,31 @@ pub fn build(b: *std.Build) !void {
     //    lib.defineCMacro("SQFS_MULTITHREADED", "0");
 
     // Add squashfuse source files
-    const c_files = &[_][]const u8{
-        "fs.c",
-        "table.c",
-        "xattr.c",
-        "cache.c",
-        //        "cache_mt.c",
-        "dir.c",
-        "file.c",
-        "nonstd-makedev.c",
-        "nonstd-pread.c",
-        "nonstd-stat.c",
-        "stat.c",
-        "stack.c",
-        "swap.c",
-    };
-
-    for (c_files) |c_file| {
-        lib.addCSourceFile(.{
-            .file = libsquashfuse_dep.path(c_file),
-            .flags = &[_][]const u8{
-                //         "-std=c11",
-            },
-        });
-    }
+    //    const c_files = &[_][]const u8{
+    //        "fs.c",
+    //        "table.c",
+    //        "xattr.c",
+    //        "cache.c",
+    //        //        "cache_mt.c",
+    //        "dir.c",
+    //        "file.c",
+    //        "nonstd-makedev.c",
+    //        "nonstd-pread.c",
+    //        "nonstd-stat.c",
+    //        "stat.c",
+    //        "stack.c",
+    //        "swap.c",
+    //    };
+    //
+    //    for (c_files) |c_file| {
+    //        lib.addCSourceFile(.{
+    //            .file = libsquashfuse_dep.path(c_file),
+    //            .flags = &[_][]const u8{
+    //                //         "-std=c11",
+    //                "-fno-sanitize=undefined",
+    //            },
+    //        });
+    //    }
 
     exe.root_module.addImport("squashfuse", squashfuse_module);
     exe.root_module.addImport("fuse", fuse_module);

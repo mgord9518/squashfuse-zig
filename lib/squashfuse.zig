@@ -3,7 +3,6 @@ const io = std.io;
 const os = std.os;
 const posix = std.posix;
 const fs = std.fs;
-const S = std.os.linux.S;
 
 pub const build_options = @import("build_options");
 
@@ -46,11 +45,12 @@ fn SquashFsErrorFromInt(err: c_uint) SquashFsError!void {
     };
 }
 
+/// Top-level SquashFS object; should fully implement std.fs.Dir functionality
 pub const SquashFs = struct {
+    internal: c.sqfs,
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
     arena2: std.heap.ArenaAllocator,
-    internal: c.sqfs,
     version: std.SemanticVersion,
     file: fs.File,
     decompressFn: Decompressor,
@@ -185,6 +185,41 @@ pub const SquashFs = struct {
         pub const IpcInode = packed struct {
             base: InodeBase,
             nlink: u32,
+        };
+
+        pub const LDirInode = packed struct {
+            base: InodeBase,
+            nlink: u32,
+            file_size: u32,
+            start_block: u32,
+            parent_inode: u32,
+            i_count: u16,
+            offset: u16,
+            xattr: u32,
+        };
+
+        pub const LFileInode = packed struct {
+            base: InodeBase,
+            start_block: u64,
+            file_size: u64,
+            sparse: u64,
+            nlink: u32,
+            fragment: u32,
+            offset: u32,
+            xattr: u32,
+        };
+
+        pub const LDevInode = packed struct {
+            base: InodeBase,
+            nlink: u32,
+            rdev: u32,
+            xattr: u32,
+        };
+
+        pub const LIpcInode = packed struct {
+            base: InodeBase,
+            nlink: u32,
+            xattr: u32,
         };
     };
 
@@ -326,19 +361,20 @@ pub const SquashFs = struct {
     }
 
     fn TypeFromFileKind(comptime kind: SquashFs.File.InternalKind) type {
+        // zig fmt: off
         return switch (kind) {
             .directory => SquashFs.SuperBlock.DirInode,
-            .file => SquashFs.SuperBlock.FileInode,
-            .sym_link => SquashFs.SuperBlock.SymLinkInode,
+            .file      => SquashFs.SuperBlock.FileInode,
+            .sym_link, .l_sym_link           => SquashFs.SuperBlock.SymLinkInode,
             .block_device, .character_device => SquashFs.SuperBlock.DevInode,
             .named_pipe, .unix_domain_socket => SquashFs.SuperBlock.IpcInode,
 
-            .l_directory => c.squashfs_ldir_inode,
-            .l_file => c.squashfs_lreg_inode,
-            .l_sym_link => c.squashfs_lsymlink_inode,
-            .l_block_device, .l_character_device => c.squashfs_ldev_inode,
-            .l_named_pipe, .l_unix_domain_socket => c.squashfs_lipc_inode,
+            .l_directory => SquashFs.SuperBlock.LDirInode,
+            .l_file      => SquashFs.SuperBlock.LFileInode,
+            .l_block_device, .l_character_device => SquashFs.SuperBlock.LDevInode,
+            .l_named_pipe, .l_unix_domain_socket => SquashFs.SuperBlock.LIpcInode,
         };
+        // zig fmt: on
     }
 
     fn inodeType(
@@ -366,8 +402,6 @@ pub const SquashFs = struct {
         sqfs: *SquashFs,
         id: u64,
     ) !Inode.Internal {
-        //var inode = std.mem.zeroes(c.sqfs_inode);
-        //var inode: c.sqfs_inode = @bitCast(Inode.Internal{
         var inode = Inode.Internal{
             .base = std.mem.zeroes(SquashFs.SuperBlock.InodeBase),
             .nlink = 0,
@@ -397,15 +431,17 @@ pub const SquashFs = struct {
 
         const kind: SquashFs.File.InternalKind = @enumFromInt(inode.base.kind);
 
+        // zig fmt: off
         inode.base.mode |= switch (kind) {
-            .file, .l_file => S.IFREG,
-            .directory, .l_directory => S.IFDIR,
-            .sym_link, .l_sym_link => S.IFLNK,
-            .block_device, .l_block_device => S.IFBLK,
-            .character_device, .l_character_device => S.IFCHR,
-            .named_pipe, .l_named_pipe => S.IFIFO,
-            .unix_domain_socket, .l_unix_domain_socket => S.IFSOCK,
+            .file, .l_file             => posix.S.IFREG,
+            .directory, .l_directory   => posix.S.IFDIR,
+            .sym_link, .l_sym_link     => posix.S.IFLNK,
+            .named_pipe, .l_named_pipe => posix.S.IFIFO,
+            .block_device, .l_block_device             => posix.S.IFBLK,
+            .character_device, .l_character_device     => posix.S.IFCHR,
+            .unix_domain_socket, .l_unix_domain_socket => posix.S.IFSOCK,
         };
+        // zig fmt: on
 
         switch (kind) {
             .file => {
@@ -666,9 +702,6 @@ pub const SquashFs = struct {
             return buf[0..link_target.len :0];
         }
 
-        /// Wrapper of `sqfs_read_range`
-        /// Use for reading one byte buffer at a time
-        /// Retruns the amount of bytes read
         pub fn read(self: *Inode, buf: []u8) !usize {
             if (self.kind != .file) {
                 return SquashFsError.NotRegularFile;
@@ -1092,6 +1125,30 @@ pub const SquashFs = struct {
             header: u32,
             input_size: u32,
 
+            pub fn init(sqfs: *SquashFs, inode: *Inode) !BlockList {
+                return .{
+                    .sqfs = sqfs,
+                    .remain = BlockList.count(sqfs, inode),
+                    .cur = inode.internal.next,
+                    .started = false,
+                    .pos = 0,
+                    .header = 0,
+                    .block = inode.internal.xtra.reg.start_block,
+                    .input_size = 0,
+                };
+            }
+
+            pub fn count(sqfs: *SquashFs, inode: *Inode) usize {
+                const size = inode.internal.xtra.reg.file_size;
+                const block = sqfs.super_block.block_size;
+
+                if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) {
+                    return std.math.divCeil(usize, size, block) catch unreachable;
+                }
+
+                return size / block;
+            }
+
             pub fn next(bl: *BlockList, allocator: std.mem.Allocator) !void {
                 if (bl.remain == 0) {
                     // TODO: better errors
@@ -1110,6 +1167,9 @@ pub const SquashFs = struct {
                 bl.header = littleToNative(bl.header);
 
                 bl.block += bl.input_size;
+
+                // sqfs_data_header
+                bl.input_size = bl.header & ~@as(u32, SquashFs.compressed_bit_block);
 
                 if (bl.started) {
                     bl.pos += bl.sqfs.super_block.block_size;
@@ -1190,7 +1250,6 @@ fn readRange(
     sqfs: *SquashFs,
     inode: *SquashFs.Inode,
     start: usize,
-    //obuf: [*]u8,
     obuf: []u8,
 ) !usize {
     var buf = obuf.ptr;
@@ -1209,12 +1268,12 @@ fn readRange(
     }
 
     var bl: SquashFs.File.BlockList = undefined;
-    try SquashFsErrorFromInt(c.sqfs_blockidx_blocklist(
-        &sqfs.internal,
-        @ptrCast(&inode.internal),
+    try Cache.BlockIdx.blockList(
+        sqfs,
+        inode,
         @ptrCast(&bl),
-        @intCast(start),
-    ));
+        start,
+    );
 
     var read_off = start % block_size;
     const buf_orig = buf;
@@ -1229,23 +1288,13 @@ fn readRange(
         if (fragment) {
             if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
 
-            //            try SquashFsErrorFromInt(c.sqfs_frag_block(
-            //                &sqfs.internal,
-            //                &inode.internal,
-            //                &data_off,
-            //                &data_size,
-            //                @ptrCast(&block),
-            //            ));
-
             block = try inode.fragBlock(
                 &data_off,
                 &data_size,
             );
         } else {
-            try SquashFsErrorFromInt(c.sqfs_blocklist_next(@ptrCast(&bl)));
-
             // TODO
-            //try bl.next(std.heap.page_allocator);
+            try bl.next(sqfs.allocator);
 
             if (bl.pos + block_size <= start) continue;
 
@@ -1255,13 +1304,11 @@ fn readRange(
 
                 if (data_size > block_size) data_size = block_size;
             } else {
-                try SquashFsErrorFromInt(c.sqfs_data_cache(
-                    &sqfs.internal,
-                    &sqfs.internal.data_cache,
+                block = try sqfs.dataCache(
+                    @ptrCast(@alignCast(sqfs.internal.data_cache)),
                     @intCast(bl.block),
                     bl.header,
-                    @ptrCast(&block),
-                ));
+                );
 
                 data_size = block.?.size;
             }
@@ -1308,17 +1355,6 @@ pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decomp
     }
 
     return error.InvalidCompression;
-}
-
-export fn sqfs_decompressor_get(kind: SquashFs.Compression) ?*const fn ([*]u8, usize, [*]u8, *usize) callconv(.C) c.sqfs_err {
-    return switch (kind) {
-        .zlib => algos.getLibsquashfuseDecompressionFn(.zlib),
-        .lzma => algos.getLibsquashfuseDecompressionFn(.lzma),
-        .xz => algos.getLibsquashfuseDecompressionFn(.xz),
-        .lzo => algos.getLibsquashfuseDecompressionFn(.lzo),
-        .lz4 => algos.getLibsquashfuseDecompressionFn(.lz4),
-        .zstd => algos.getLibsquashfuseDecompressionFn(.zstd),
-    };
 }
 
 fn dataBlockRead(
@@ -1510,11 +1546,8 @@ fn initInternal(
     }
 
     // TODO: find and replace functions using decompressor
-    sqfs.decompressor = @ptrCast(sqfs_decompressor_get(@enumFromInt(sqfs.sb.compression)));
-    //sqfs.decompressor = @ptrCast(&noop);
-    if (sqfs.decompressor == null) {
-        return SquashFsError.InvalidCompression;
-    }
+    //sqfs.decompressor = @ptrCast(sqfs_decompressor_get(@enumFromInt(sqfs.sb.compression)));
+    sqfs.decompressor = null;
 
     // TODO: clean up memory if fail
     sqfs.md_cache = @ptrCast(try Cache.BlockCacheEntry.init(arena, SquashFs.cached_blocks));
@@ -1524,17 +1557,6 @@ fn initInternal(
     sqfs.blockidx = @ptrCast(try Cache.BlockIdx.init(arena));
 
     return sqfs;
-}
-
-fn initBlockIdx(allocator: std.mem.Allocator, ch: *c.sqfs_cache) !void {
-    try Cache.initCache(
-        allocator,
-        ch,
-        @sizeOf(**c.sqfs_blockidx_entry),
-        SquashFs.meta_slots,
-        @ptrCast(&noop),
-        //&c.sqfs_block_cache_dispose,
-    );
 }
 
 // Define C symbols for compression algos

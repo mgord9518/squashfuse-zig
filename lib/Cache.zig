@@ -3,6 +3,7 @@ pub const Cache = @This();
 const std = @import("std");
 const squashfuse = @import("squashfuse.zig");
 const SquashFs = squashfuse.SquashFs;
+const Inode = SquashFs.Inode;
 const assert = std.debug.assert;
 
 buf: [*]u8,
@@ -12,6 +13,10 @@ dispose: Dispose,
 size: usize,
 count: usize,
 next: usize,
+
+//const c = @cImport({
+//    @cInclude("squashfuse.h");
+//});
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -162,28 +167,118 @@ pub const BlockIdx = struct {
         _ = e;
     }
 
+    pub fn indexable(sqfs: *SquashFs, inode: *Inode) bool {
+        const blocks = SquashFs.File.BlockList.count(sqfs, inode);
+        const md_size = blocks * @sizeOf(u32);
+        return md_size >= SquashFs.metadata_size;
+    }
+
+    fn blockidx_add(sqfs: *SquashFs, inode: *Inode, out: [*c][*c]BlockIdx.Entry, cachep: **BlockIdx.Entry) !void {
+        var blocks: usize = undefined;
+        var md_size: usize = undefined;
+        var count: usize = undefined;
+
+        var blockidx: [*c]BlockIdx.Entry = undefined;
+        var bl: SquashFs.File.BlockList = undefined;
+
+        var i: usize = 0;
+        var first = true;
+
+        out.* = null;
+
+        //        blocks = c.sqfs_blocklist_count(
+        //            &sqfs.internal,
+        //            @ptrCast(&inode.internal),
+        //        );
+
+        blocks = SquashFs.File.BlockList.count(sqfs, inode);
+        md_size = blocks * @sizeOf(BlockIdx.Entry);
+        count = (inode.internal.next.offset + md_size - 1 / SquashFs.metadata_size);
+
+        blockidx = @ptrCast((sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable).ptr);
+
+        //c.sqfs_blocklist_init(&sqfs.internal, @ptrCast(&inode.internal), &bl);
+        bl = try SquashFs.File.BlockList.init(sqfs, inode);
+        while (bl.remain > 0 and i < count) {
+            if (bl.cur.offset < @sizeOf(BlockIdx.Entry) and !first) {
+                blockidx[i].data_block = bl.block + bl.input_size;
+                blockidx[i].md_block = @intCast(@as(u64, @intCast(bl.cur.block)) - sqfs.super_block.inode_table_start);
+                i += 1;
+            }
+            first = false;
+
+            try bl.next(sqfs.allocator);
+            errdefer {
+                sqfs.allocator.free(blockidx[0..count]);
+                unreachable;
+            }
+        }
+
+        out.* = blockidx;
+        cachep.* = blockidx;
+    }
+
     // TODO
-    //    blockList(sqfs: *SquashFs, inode: *Inode, bl: *c.sqfs_blocklist, start: c.sqfs_off_t,) !void {
-    //        var block: usize = 0;
-    //        var metablock: usize = 0;
-    //        var skipped: usize = 0;
-    //
-    //        bp: **c.sqfs_blockidx_entry = undefined;
-    //        blockidx: *c.sqfs_blockidx_entry = undefined;
-    //
-    //        idx: c.sqfs_cache_idx;
-    //
-    //        c.sqfs_blocklist_init(&sqfs.internal, &inode.internal, bl);
-    //        block = start / sqfs.internal.sb.block_size;
-    //        if (block > bl.remain) {
-    //            bl.remain = 0;
-    //            return;
-    //        }
-    //
-    //        metablock = (bl.cur.offset + block * @sizeOf(c.sqfs_blocklist_entry)) / SquashFs.metadata_size;
-    //
-    //        if (metablock == 0) return;
-    //    }
+    pub fn blockList(
+        sqfs: *SquashFs,
+        inode: *SquashFs.Inode,
+        bl: *SquashFs.File.BlockList,
+        start: u64,
+        //) !SquashFs.BlockList {
+    ) !void {
+        var metablock: usize = 0;
+        var skipped: usize = 0;
+
+        var bp: **BlockIdx.Entry = undefined;
+        var blockidx: [*c]BlockIdx.Entry = undefined;
+
+        var idx: u64 = 0;
+
+        bl.* = try SquashFs.File.BlockList.init(sqfs, inode);
+
+        var block: usize = start / sqfs.super_block.block_size;
+
+        block = start / sqfs.super_block.block_size;
+        if (block > bl.remain) {
+            bl.remain = 0;
+            return;
+        }
+
+        metablock = (bl.cur.offset + block * 4) / SquashFs.metadata_size;
+
+        if (metablock == 0) return;
+
+        if (!BlockIdx.indexable(
+            sqfs,
+            inode,
+        )) return;
+
+        idx = inode.internal.base.inode_number + 1;
+
+        bp = @ptrCast(getCache(sqfs.allocator, @ptrCast(@alignCast(sqfs.internal.blockidx)), idx));
+        //if (c.sqfs_cache_entry_valid(&sqfs.internal.blockidx, @ptrCast(bp)) != 0) {
+        if (@as(*BlockCacheEntry, @ptrCast(bp)).isValid()) {
+            blockidx = bp.*;
+        } else {
+            try blockidx_add(
+                sqfs,
+                inode,
+                @ptrCast(&blockidx),
+                @ptrCast(bp),
+            );
+            @as(*BlockCacheEntry, @ptrCast(bp)).markValid();
+        }
+
+        skipped = (metablock * SquashFs.metadata_size / 4 - bl.cur.offset / 4);
+
+        blockidx += metablock - 1;
+
+        bl.cur.block = @intCast(blockidx[0].md_block + sqfs.super_block.inode_table_start);
+        bl.cur.offset %= 4;
+        bl.remain -= skipped;
+        bl.pos = skipped * sqfs.super_block.block_size;
+        bl.block = blockidx[0].data_block;
+    }
 };
 
 fn noop() void {}

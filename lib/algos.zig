@@ -6,37 +6,6 @@ const build_options = @import("build_options");
 const squashfuse = @import("squashfuse.zig");
 const SquashFs = squashfuse.SquashFs;
 
-const c = @cImport({
-    @cInclude("squashfuse.h");
-});
-
-pub const LibsquashfuseDecompressor = *const fn ([*]const u8, usize, [*]u8, *usize) callconv(.C) c.sqfs_err;
-
-pub fn getLibsquashfuseDecompressionFn(comptime compression: SquashFs.Compression) ?LibsquashfuseDecompressor {
-    if (!comptime builtWithDecompression(compression)) {
-        return null;
-    }
-
-    return struct {
-        pub fn decompressBlock(
-            in: [*]const u8,
-            in_size: usize,
-            out: [*]u8,
-            out_size: *usize,
-        ) callconv(.C) c.sqfs_err {
-            const allocator = std.heap.c_allocator;
-
-            out_size.* = @field(Algos, @tagName(compression) ++ "Decode")(
-                allocator,
-                in[0..in_size],
-                out[0..out_size.*],
-            ) catch return c.SQFS_ERR;
-
-            return c.SQFS_OK;
-        }
-    }.decompressBlock;
-}
-
 pub fn builtWithDecompression(comptime compression: SquashFs.Compression) bool {
     return switch (compression) {
         .zlib => build_options.enable_zlib,
