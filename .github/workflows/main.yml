@@ -11,6 +11,11 @@ jobs:
     - uses: actions/checkout@v2
     - uses: goto-bus-stop/setup-zig@v2
 
+    - name: Install squashfs-tools
+      run: |
+        sudo apt update
+        sudo apt install squashfs-tools
+
     - name: Build (Musl libc, static, x86_64)
       run: ARCH=x86_64 OS=linux LIBC=musl ./build.sh
 
@@ -30,6 +35,12 @@ jobs:
       run: ARCH=x86 OS=linux LIBC=gnu.2.16 ./build.sh
 
     # TODO: ARM32 builds
+
+    - name: Build test images
+      run: |
+        cd test
+        ./make_images.sh
+        cd ..
 
     - name: Test
       run: |
