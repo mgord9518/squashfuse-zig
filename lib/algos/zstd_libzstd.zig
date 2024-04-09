@@ -10,7 +10,7 @@ extern fn ZSTD_decompress(
     usize,
 ) usize;
 
-pub fn zstdDecode(
+pub fn decode(
     allocator: std.mem.Allocator,
     in: []const u8,
     out: []u8,

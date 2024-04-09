@@ -9,7 +9,7 @@ extern fn LZ4_decompress_safe(
     c_int,
 ) c_int;
 
-pub fn lz4Decode(
+pub fn decode(
     allocator: std.mem.Allocator,
     in: []const u8,
     out: []u8,

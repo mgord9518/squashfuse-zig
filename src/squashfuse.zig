@@ -6,6 +6,8 @@ const posix = std.posix;
 const fuse = @import("fuse");
 const clap = @import("clap");
 
+//pub const build_options = @import("build_options");
+
 const SquashFs = @import("squashfuse").SquashFs;
 
 // Struct for holding our FUSE info
@@ -323,6 +325,7 @@ pub fn main() !void {
         try squash.file_tree.put(new_path, entry);
     }
 
+    //if (build_options.enable_fuse) {
     // TODO: nicer error printing
     fuse.run(
         allocator,
@@ -343,6 +346,7 @@ pub fn main() !void {
 
         posix.exit(1);
     };
+    //}
 
     return;
 }

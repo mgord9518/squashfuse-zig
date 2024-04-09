@@ -10,7 +10,7 @@ extern fn lzo1x_decompress_safe(
     ?*anyopaque,
 ) u32;
 
-pub fn lzoDecode(
+pub fn decode(
     allocator: std.mem.Allocator,
     in: []const u8,
     out: []u8,

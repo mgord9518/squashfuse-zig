@@ -22,7 +22,7 @@ const LiblzmaAllocator = extern struct {
     o: ?*anyopaque = null,
 };
 
-pub fn xzDecode(
+pub fn decode(
     allocator: std.mem.Allocator,
     in: []const u8,
     out: []u8,

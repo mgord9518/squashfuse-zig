@@ -309,7 +309,7 @@ pub const SquashFs = struct {
         // TODO: XAttr support
         //try sqfs.XattrInit();
 
-        sqfs.decompressFn = try getDecompressor(
+        sqfs.decompressFn = try algos.getDecompressor(
             sqfs.super_block.compression,
         );
 
@@ -1335,29 +1335,6 @@ fn readRange(
 
     size = @intFromPtr(buf - @intFromPtr(buf_orig));
     return if (size != 0) size else error.Error;
-}
-
-pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decompressor {
-    switch (kind) {
-        .zlib => {
-            if (comptime build_options.enable_zlib) return algos.zlibDecode;
-        },
-        .lzma => {},
-        .xz => {
-            if (comptime build_options.enable_xz) return algos.xzDecode;
-        },
-        .lzo => {
-            if (comptime build_options.enable_lzo) return algos.lzoDecode;
-        },
-        .lz4 => {
-            if (comptime build_options.enable_lz4) return algos.lz4Decode;
-        },
-        .zstd => {
-            if (comptime build_options.enable_zstd) return algos.zstdDecode;
-        },
-    }
-
-    return error.InvalidCompression;
 }
 
 fn dataBlockRead(

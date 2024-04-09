@@ -42,7 +42,7 @@ const Decompressor = extern struct {
     free_func: ?*anyopaque = undefined,
 };
 
-pub fn zlibDecode(
+pub fn decode(
     allocator: std.mem.Allocator,
     in: []const u8,
     out: []u8,

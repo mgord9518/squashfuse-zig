@@ -5,40 +5,50 @@ const builtin = std.builtin;
 const build_options = @import("build_options");
 const squashfuse = @import("squashfuse.zig");
 const SquashFs = squashfuse.SquashFs;
+const SquashFsError = squashfuse.SquashFsError;
 
 pub fn builtWithDecompression(comptime compression: SquashFs.Compression) bool {
-    return switch (compression) {
-        .zlib => build_options.enable_zlib,
-        .lzma => false,
-        .lzo => build_options.enable_lzo,
-        .xz => build_options.enable_xz,
-        .lz4 => build_options.enable_lz4,
-        .zstd => build_options.enable_zstd,
-    };
+    return @field(build_options, "enable-" ++ @tagName(compression));
 }
 
-pub const zlibDecode = if (build_options.enable_zlib) @import("algos/zlib_libdeflate.zig").zlibDecode else {};
+pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decompressor {
+    switch (kind) {
+        .zlib => {
+            if (!builtWithDecompression(.zlib)) return error.InvalidCompression;
 
-// TODO: lzma
+            return @import("algos/zlib_libdeflate.zig").decode;
+        },
+        // TODO
+        .lzma => return error.InvalidCompression,
+        .xz => {
+            if (!builtWithDecompression(.xz)) return error.InvalidCompression;
 
-pub const lzoDecode = if (build_options.enable_lzo) @import("algos/lzo_minilzo.zig").lzoDecode else {};
+            if (build_options.@"use-zig-xz") {
+                return @import("algos/xz_zig.zig").decode;
+            }
 
-pub const xzDecode = if (build_options.enable_xz)
-blk: {
-    if (build_options.use_zig_xz) {
-        break :blk @import("algos/xz_zig.zig").xzDecode;
-    } else {
-        break :blk @import("algos/xz_liblzma.zig").xzDecode;
+            return @import("algos/xz_liblzma.zig").decode;
+        },
+        .lzo => {
+            if (!builtWithDecompression(.lzo)) return error.InvalidCompression;
+
+            return @import("algos/lzo_minilzo.zig").decode;
+        },
+        .lz4 => {
+            if (!builtWithDecompression(.lz4)) return error.InvalidCompression;
+
+            return @import("algos/lz4_liblz4.zig").decode;
+        },
+        .zstd => {
+            if (!builtWithDecompression(.zstd)) return error.InvalidCompression;
+
+            if (build_options.@"use-zig-zstd") {
+                return @import("algos/zstd_zig.zig").decode;
+            }
+
+            return @import("algos/zstd_libzstd.zig").decode;
+        },
     }
-} else struct {};
 
-pub const lz4Decode = if (build_options.enable_lz4) @import("algos/lz4_liblz4.zig").lz4Decode else {};
-
-pub const zstdDecode = if (build_options.enable_zstd)
-blk: {
-    if (build_options.use_zig_zstd) {
-        break :blk @import("algos/zstd_zig.zig").zstdDecode;
-    } else {
-        break :blk @import("algos/zstd_libzstd.zig").zstdDecode;
-    }
-} else struct {};
+    unreachable;
+}
