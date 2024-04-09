@@ -192,15 +192,16 @@ pub const BlockIdx = struct {
         //        );
 
         blocks = SquashFs.File.BlockList.count(sqfs, inode);
-        md_size = blocks * @sizeOf(BlockIdx.Entry);
-        count = (inode.internal.next.offset + md_size - 1 / SquashFs.metadata_size);
+        md_size = blocks * 4;
+        count = (inode.internal.next.offset + md_size - 1) / SquashFs.metadata_size;
 
         blockidx = @ptrCast((sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable).ptr);
 
         //c.sqfs_blocklist_init(&sqfs.internal, @ptrCast(&inode.internal), &bl);
         bl = try SquashFs.File.BlockList.init(sqfs, inode);
+
         while (bl.remain > 0 and i < count) {
-            if (bl.cur.offset < @sizeOf(BlockIdx.Entry) and !first) {
+            if (bl.cur.offset < 4 and !first) {
                 blockidx[i].data_block = bl.block + bl.input_size;
                 blockidx[i].md_block = @intCast(@as(u64, @intCast(bl.cur.block)) - sqfs.super_block.inode_table_start);
                 i += 1;
@@ -267,7 +268,7 @@ pub const BlockIdx = struct {
             @as(*BlockCacheEntry, @ptrCast(bp)).markValid();
         }
 
-        skipped = (metablock * SquashFs.metadata_size / 4 - bl.cur.offset / 4);
+        skipped = (metablock * SquashFs.metadata_size / 4) - (bl.cur.offset / 4);
 
         blockidx += metablock - 1;
 

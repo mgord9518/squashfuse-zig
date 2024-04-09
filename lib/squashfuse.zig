@@ -9,10 +9,6 @@ pub const build_options = @import("build_options");
 const Cache = @import("Cache.zig");
 const Table = @import("Table.zig");
 
-const c = @cImport({
-    @cInclude("squashfuse.h");
-});
-
 pub const SquashFsError = error{
     Error,
     InvalidFormat,
@@ -152,7 +148,7 @@ pub const SquashFs = struct {
             UNUSED_2: u4,
         };
 
-        pub const InodeBase = packed struct {
+        pub const InodeBase = extern struct {
             kind: u16,
             mode: u16,
             uid: u16,
@@ -161,7 +157,7 @@ pub const SquashFs = struct {
             inode_number: u32,
         };
 
-        pub const DirInode = packed struct {
+        pub const DirInode = extern struct {
             base: InodeBase,
             start_block: u32,
             nlink: u32,
@@ -170,7 +166,7 @@ pub const SquashFs = struct {
             parent_inode: u32,
         };
 
-        pub const FileInode = packed struct {
+        pub const FileInode = extern struct {
             base: InodeBase,
             start_block: u32,
             fragment: u32,
@@ -178,24 +174,24 @@ pub const SquashFs = struct {
             file_size: u32,
         };
 
-        pub const SymLinkInode = packed struct {
+        pub const SymLinkInode = extern struct {
             base: InodeBase,
             nlink: u32,
             symlink_size: u32,
         };
 
-        pub const DevInode = packed struct {
+        pub const DevInode = extern struct {
             base: InodeBase,
             nlink: u32,
             rdev: u32,
         };
 
-        pub const IpcInode = packed struct {
+        pub const IpcInode = extern struct {
             base: InodeBase,
             nlink: u32,
         };
 
-        pub const LDirInode = packed struct {
+        pub const LDirInode = extern struct {
             base: InodeBase,
             nlink: u32,
             file_size: u32,
@@ -206,7 +202,7 @@ pub const SquashFs = struct {
             xattr: u32,
         };
 
-        pub const LFileInode = packed struct {
+        pub const LFileInode = extern struct {
             base: InodeBase,
             start_block: u64,
             file_size: u64,
@@ -217,14 +213,14 @@ pub const SquashFs = struct {
             xattr: u32,
         };
 
-        pub const LDevInode = packed struct {
+        pub const LDevInode = extern struct {
             base: InodeBase,
             nlink: u32,
             rdev: u32,
             xattr: u32,
         };
 
-        pub const LIpcInode = packed struct {
+        pub const LIpcInode = extern struct {
             base: InodeBase,
             nlink: u32,
             xattr: u32,
@@ -425,7 +421,7 @@ pub const SquashFs = struct {
             sqfs.super_block.inode_table_start,
         );
 
-        inode.next = @bitCast(cur);
+        inode.next = cur;
 
         try mdRead(
             allocator,
