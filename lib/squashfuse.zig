@@ -391,9 +391,8 @@ pub const SquashFs = struct {
 
         var x: T = undefined;
 
-        try mdRead(
+        try sqfs.mdRead(
             allocator,
-            sqfs,
             &inode.next,
             @as([*]u8, @ptrCast(&x))[0..@sizeOf(T)],
         );
@@ -423,10 +422,9 @@ pub const SquashFs = struct {
 
         inode.next = cur;
 
-        try mdRead(
+        try sqfs.mdRead(
             allocator,
             //sqfs.arena.allocator(),
-            sqfs,
             &cur,
             @as([*]u8, @ptrCast(&inode.base))[0..@sizeOf(@TypeOf(inode.base))],
         );
@@ -689,9 +687,8 @@ pub const SquashFs = struct {
 
             var cur = inode.internal.next;
 
-            try mdRead(
+            try inode.parent.mdRead(
                 inode.parent.arena.allocator(),
-                inode.parent,
                 &cur,
                 buf[0..len],
             );
@@ -706,21 +703,106 @@ pub const SquashFs = struct {
             return buf[0..link_target.len :0];
         }
 
-        pub fn read(self: *Inode, buf: []u8) !usize {
-            if (self.kind != .file) {
-                return SquashFsError.NotRegularFile;
-            }
-
-            const buf_len = try readRange(
-                self.parent,
-                self,
-                @intCast(self.pos),
+        // TODO: Move these to `SquashFs.File`
+        pub const ReadError = std.fs.File.ReadError;
+        pub fn read(self: *Inode, buf: []u8) ReadError!usize {
+            const buf_len = try self.pread(
                 buf,
+                self.pos,
             );
 
             self.pos += buf_len;
 
             return buf_len;
+        }
+
+        pub const PReadError = ReadError;
+        pub fn pread(
+            inode: *SquashFs.Inode,
+            buf: []u8,
+            offset: usize,
+        ) PReadError!usize {
+            if (inode.kind == .directory) return error.IsDir;
+
+            var nbuf = buf;
+            var sqfs = inode.parent;
+
+            const file_size = inode.internal.xtra.reg.file_size;
+            const block_size = sqfs.super_block.block_size;
+
+            if (nbuf.len < 0 or offset > file_size) return error.InputOutput;
+
+            if (offset == file_size) {
+                nbuf.len = 0;
+                return 0;
+            }
+
+            var bl: SquashFs.File.BlockList = undefined;
+            Cache.BlockIdx.blockList(
+                sqfs,
+                inode,
+                &bl,
+                offset,
+            ) catch return error.SystemResources;
+
+            var read_off = offset % block_size;
+
+            while (nbuf.len > 0) {
+                var block: ?*Cache.Block = null;
+                var data_off: usize = 0;
+                var data_size: usize = 0;
+                var take: usize = 0;
+
+                const fragment = bl.remain == 0;
+                if (fragment) {
+                    if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
+
+                    block = inode.fragBlock(
+                        &data_off,
+                        &data_size,
+                    ) catch return error.SystemResources;
+                } else {
+                    // TODO
+                    bl.next(sqfs.allocator) catch return error.SystemResources;
+
+                    if (bl.pos + block_size <= offset) continue;
+
+                    data_off = 0;
+                    if (bl.input_size == 0) {
+                        data_size = @intCast(file_size - bl.pos);
+
+                        if (data_size > block_size) data_size = block_size;
+                    } else {
+                        block = sqfs.dataCache(
+                            @ptrCast(@alignCast(sqfs.data_cache)),
+                            @intCast(bl.block),
+                            bl.header,
+                        ) catch return error.SystemResources;
+
+                        data_size = block.?.size;
+                    }
+                }
+
+                take = data_size - read_off;
+                if (take > nbuf.len) take = nbuf.len;
+
+                if (block != null) {
+                    @memcpy(nbuf[0..take], block.?.data[data_off + read_off ..][0..take]);
+                } else {
+                    @memset(nbuf[0..take], 0);
+                }
+
+                read_off = 0;
+                nbuf = nbuf[take..];
+
+                if (fragment) break;
+            }
+
+            const size = buf.len - nbuf.len;
+
+            if (size == 0) return error.InputOutput;
+
+            return size;
         }
 
         pub const SeekableStream = io.SeekableStream(
@@ -892,26 +974,28 @@ pub const SquashFs = struct {
 
             /// Returns an entry for the next inode in the directory
             pub fn next(self: *Iterator) !?Entry {
-                var sqfs_dir_entry: SquashFs.Dir.Entry = undefined;
+                //var sqfs_dir_entry: Dir.Entry = undefined;
 
-                sqfs_dir_entry.name = &self.name_buf;
+                //               sqfs_dir_entry.name = &self.name_buf;
 
-                const found = try Dir.dirNext(
-                    self.dir.parent.arena.allocator(),
-                    self.parent,
-                    &self.internal,
-                    &sqfs_dir_entry,
-                );
+                var iterator = Dir.Iterator{
+                    .name_buf = &self.name_buf,
+                    .sqfs = self.parent,
+                    .allocator = self.dir.parent.arena.allocator(),
+                    .dir = &self.internal,
+                };
 
-                if (!found) return null;
+                const sqfs_dir_entry = try iterator.next() orelse return null;
+
+                //                if (!found) return null;
 
                 // Append null byte
-                self.name_buf[sqfs_dir_entry.name_len] = '\x00';
+                self.name_buf[sqfs_dir_entry.name.len] = '\x00';
 
                 return .{
                     .id = sqfs_dir_entry.inode,
-                    .name = self.name_buf[0..sqfs_dir_entry.name_len :0],
-                    .kind = @enumFromInt(sqfs_dir_entry.kind),
+                    .name = self.name_buf[0..sqfs_dir_entry.name.len :0],
+                    .kind = sqfs_dir_entry.kind,
                     .parent = self.parent,
                 };
             }
@@ -1154,9 +1238,8 @@ pub const SquashFs = struct {
 
                 bl.remain -= 1;
 
-                try mdRead(
+                try bl.sqfs.mdRead(
                     allocator,
-                    bl.sqfs,
                     &bl.cur,
                     @as([*]u8, @ptrCast(&bl.header))[0..4],
                 );
@@ -1190,6 +1273,42 @@ pub const SquashFs = struct {
             };
         }
     };
+
+    pub fn mdRead(
+        sqfs: *SquashFs,
+        allocator: std.mem.Allocator,
+        cur: *SquashFs.MdCursor,
+        buf: []u8,
+    ) !void {
+        var pos = cur.block;
+
+        var size = buf.len;
+        var nbuf = buf;
+
+        while (size > 0) {
+            const block = try sqfs.mdCache(allocator, &pos);
+
+            var take = block.size - cur.offset;
+            if (take > size) {
+                take = size;
+            }
+
+            @memcpy(
+                nbuf[0..take],
+                block.data[cur.offset..][0..take],
+            );
+
+            nbuf = nbuf[take..];
+
+            size -= take;
+            cur.offset += take;
+
+            if (cur.offset == block.size) {
+                cur.block = pos;
+                cur.offset = 0;
+            }
+        }
+    }
 
     pub const XattrId = packed struct {
         xattr: u64,
@@ -1247,94 +1366,6 @@ pub fn load(fd: i32, slice: anytype, offset: u64) !void {
     ) != size * slice.len) {
         return error.PartialRead;
     }
-}
-
-fn readRange(
-    sqfs: *SquashFs,
-    inode: *SquashFs.Inode,
-    start: usize,
-    obuf: []u8,
-) !usize {
-    var buf = obuf.ptr;
-    var size = obuf.len;
-
-    if (inode.kind != .file) return SquashFsError.Error;
-
-    const file_size = inode.internal.xtra.reg.file_size;
-    const block_size = sqfs.super_block.block_size;
-
-    if (size < 0 or start > file_size) return SquashFsError.Error;
-
-    if (start == file_size) {
-        size = 0;
-        return 0;
-    }
-
-    var bl: SquashFs.File.BlockList = undefined;
-    try Cache.BlockIdx.blockList(
-        sqfs,
-        inode,
-        @ptrCast(&bl),
-        start,
-    );
-
-    var read_off = start % block_size;
-    const buf_orig = buf;
-
-    while (size > 0) {
-        var block: ?*Cache.Block = null;
-        var data_off: usize = 0;
-        var data_size: usize = 0;
-        var take: usize = 0;
-
-        const fragment = bl.remain == 0;
-        if (fragment) {
-            if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
-
-            block = try inode.fragBlock(
-                &data_off,
-                &data_size,
-            );
-        } else {
-            // TODO
-            try bl.next(sqfs.allocator);
-
-            if (bl.pos + block_size <= start) continue;
-
-            data_off = 0;
-            if (bl.input_size == 0) {
-                data_size = @intCast(file_size - bl.pos);
-
-                if (data_size > block_size) data_size = block_size;
-            } else {
-                block = try sqfs.dataCache(
-                    @ptrCast(@alignCast(sqfs.data_cache)),
-                    @intCast(bl.block),
-                    bl.header,
-                );
-
-                data_size = block.?.size;
-            }
-        }
-
-        take = data_size - read_off;
-        if (take > size) take = size;
-
-        if (block != null) {
-            @memcpy(buf[0..take], block.?.data[data_off + read_off ..][0..take]);
-        } else {
-            @memset(buf[0..take], 0);
-        }
-
-        read_off = 0;
-        size -= take;
-        buf = buf + take;
-
-        if (fragment) break;
-    }
-
-    size = @intFromPtr(buf - @intFromPtr(buf_orig));
-    return if (size != 0) size else error.Error;
 }
 
 fn dataBlockRead(
@@ -1437,43 +1468,6 @@ pub fn mdBlockRead(
     );
 
     return size + hdr.len;
-}
-
-pub fn mdRead(
-    allocator: std.mem.Allocator,
-    sqfs: *SquashFs,
-    cur: *SquashFs.MdCursor,
-    buf: []u8,
-) !void {
-    var pos = cur.block;
-
-    var size = buf.len;
-    var nbuf = buf;
-
-    while (size > 0) {
-        const block = try sqfs.mdCache(allocator, @ptrCast(&pos));
-
-        var take = block.size - cur.offset;
-        if (take > size) {
-            take = size;
-        }
-
-        const data_slice: [*]u8 = @ptrCast(block.data);
-        @memcpy(
-            nbuf[0..take],
-            (data_slice + cur.offset)[0..take],
-        );
-
-        nbuf = nbuf[take..];
-
-        size -= take;
-        cur.offset += take;
-
-        if (cur.offset == block.size) {
-            cur.block = pos;
-            cur.offset = 0;
-        }
-    }
 }
 
 // Define C symbols for compression algos

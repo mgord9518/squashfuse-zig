@@ -19,6 +19,18 @@ const compression_algos = &[_][]const u8{
     "lz4",
 };
 
+test "iterate dir" {
+    const allocator = std.testing.allocator;
+
+    var sqfs = try SquashFs.init(allocator, "test/tree_zlib.sqfs", .{});
+    defer sqfs.deinit();
+
+    var root_inode = sqfs.getRootInode();
+    var dir = try SquashFs.Dir.open(&sqfs, &root_inode);
+
+    _ = try dir.openDir("2/another dir", .{});
+}
+
 test "open SquashFS image (zlib)" {
     const allocator = std.testing.allocator;
 
