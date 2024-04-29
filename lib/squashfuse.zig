@@ -652,7 +652,7 @@ pub const SquashFs = struct {
     pub fn mdCache(
         sqfs: *SquashFs,
         allocator: std.mem.Allocator,
-        pos: *usize,
+        pos: *u64,
     ) !*Cache.Block {
         var entry = Cache.getCache(
             allocator,
@@ -762,12 +762,12 @@ pub const SquashFs = struct {
         pub fn read(self: *Inode, buf: []u8) ReadError!usize {
             const buf_len = try self.pread(
                 buf,
-                self.pos,
+                @truncate(self.pos),
             );
 
             self.pos += buf_len;
 
-            return buf_len;
+            return @truncate(buf_len);
         }
 
         pub const PReadError = ReadError;
@@ -1529,7 +1529,7 @@ fn dataBlockRead(
 fn blockRead(
     allocator: std.mem.Allocator,
     sqfs: *SquashFs,
-    pos: usize,
+    pos: u64,
     compressed: bool,
     size: u32,
     out_size: usize,
@@ -1577,7 +1577,7 @@ fn blockRead(
 pub fn mdBlockRead(
     allocator: std.mem.Allocator,
     sqfs: *SquashFs,
-    pos: usize,
+    pos: u64,
     block: **Cache.Block,
 ) !usize {
     var hdr: [2]u8 = undefined;
