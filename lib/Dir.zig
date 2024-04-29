@@ -24,11 +24,17 @@ pub const Entry = struct {
     pub const Kind = SquashFs.File.Kind;
 };
 
-const InternalEntry = extern struct {
+const InternalEntry = packed struct {
     offset: u16,
     inode_number: u16,
-    kind: u16,
+
+    // InternalKind only needs a u4 but the datatype draws in 16 bits for it
+    kind: InternalKind,
+    UNUSED: u12,
+
     size: u16,
+
+    pub const InternalKind = SquashFs.File.InternalKind;
 };
 
 pub const Header = extern struct {
@@ -89,7 +95,7 @@ pub fn open(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
             .offset = inode.internal.xtra.dir.offset,
         },
         .offset = 0,
-        .total = @intCast(inode.internal.xtra.dir.dir_size -| 3),
+        .total = @intCast(inode.internal.xtra.dir.size -| 3),
         .header = std.mem.zeroes(Header),
     };
 }
@@ -132,12 +138,7 @@ pub const Iterator = struct {
 
         dir.header.count -= 1;
 
-        //        entry.kind = e.kind;
-        entry.kind = if (ll_entry.kind <= 7) blk: {
-            break :blk @enumFromInt(ll_entry.kind);
-        } else blk: {
-            break :blk @enumFromInt(ll_entry.kind - 7);
-        };
+        entry.kind = ll_entry.kind.toKind();
 
         entry.name.len = ll_entry.size + 1;
         entry.inode = (@as(u64, @intCast(dir.header.start_block)) << 16) + ll_entry.offset;

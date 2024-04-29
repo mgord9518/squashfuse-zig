@@ -13,7 +13,7 @@ blocks: []u64,
 
 pub fn init(
     allocator: std.mem.Allocator,
-    fd: i32,
+    sqfs: *SquashFs,
     start: usize,
     each: usize,
     count: usize,
@@ -36,8 +36,7 @@ pub fn init(
         .blocks = try allocator.alloc(u64, block_count),
     };
 
-    try squashfuse.load(
-        fd,
+    try sqfs.load(
         table.blocks,
         start,
     );
@@ -50,8 +49,8 @@ pub fn init(
 }
 
 pub fn get(
-    allocator: std.mem.Allocator,
     table: *Table,
+    allocator: std.mem.Allocator,
     sqfs: *SquashFs,
     idx: usize,
     buf: [*]u8,
@@ -63,7 +62,7 @@ pub fn get(
     var bpos = table.blocks[bnum];
 
     // TODO: Update functions to u64
-    const block = try sqfs.mdCache(allocator, @ptrCast(&bpos));
+    const block = try sqfs.mdCache(allocator, &bpos);
 
     @memcpy(buf[0..table.each], block.data[off..][0..table.each]);
 

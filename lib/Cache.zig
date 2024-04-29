@@ -14,10 +14,6 @@ size: usize,
 count: usize,
 next: usize,
 
-//const c = @cImport({
-//    @cInclude("squashfuse.h");
-//});
-
 pub fn init(
     allocator: std.mem.Allocator,
     size: usize,
@@ -55,17 +51,14 @@ pub fn entry(cache: *Cache, i: usize) ?*anyopaque {
 pub const Dispose = *const fn (data: ?*anyopaque) callconv(.C) void;
 
 // sqfs_block
-pub const Block = extern struct {
-    size: usize,
-    data: [*]u8,
+pub const Block = struct {
+    data: []u8,
     refcount: c_long,
-    //allocator: std.mem.Allocator,
 
-    //    export fn dispose(block: *Block) void {
-    //        if (c.sqfs_block_deref(@ptrCast(block))) {
-    //            std.
-    //        }
-    //    }
+    pub const Header = packed struct {
+        size: u15,
+        is_uncompressed: bool,
+    };
 };
 
 pub const BlockCacheEntry = extern struct {
@@ -151,7 +144,6 @@ pub const BlockIdx = struct {
             @sizeOf(**BlockIdx.Entry),
             SquashFs.meta_slots,
             &dispose,
-            //  @ptrCast(&noop),
         );
     }
 
@@ -184,11 +176,6 @@ pub const BlockIdx = struct {
         var first = true;
 
         out.* = null;
-
-        //        blocks = c.sqfs_blocklist_count(
-        //            &sqfs.internal,
-        //            @ptrCast(&inode.internal),
-        //        );
 
         blocks = SquashFs.File.BlockList.count(sqfs, inode);
         md_size = blocks * 4;

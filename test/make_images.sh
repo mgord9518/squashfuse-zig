@@ -1,6 +1,9 @@
 #!/bin/sh
 
-# Permissions appear to get screwed up in CI
+# Change timestamps for some files to test them
+touch -a -m -t 201012152359.59 tree/perm_400
+
+# Permissions appear to get screwed up in CI so reset them
 chmod 400 tree/perm_400
 chmod 644 tree/perm_644
 chmod 777 tree/perm_777
