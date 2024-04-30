@@ -1,9 +1,8 @@
 pub const Algos = @This();
 
 const std = @import("std");
-const builtin = std.builtin;
 const build_options = @import("build_options");
-const squashfuse = @import("squashfuse.zig");
+const squashfuse = @import("root.zig");
 const SquashFs = squashfuse.SquashFs;
 const SquashFsError = squashfuse.SquashFsError;
 

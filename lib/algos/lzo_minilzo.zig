@@ -1,5 +1,5 @@
 const std = @import("std");
-const squashfuse = @import("../squashfuse.zig");
+const squashfuse = @import("../root.zig");
 const DecompressError = squashfuse.DecompressError;
 
 extern fn lzo1x_decompress_safe(

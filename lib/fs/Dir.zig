@@ -1,6 +1,6 @@
 const std = @import("std");
 const os = std.os;
-const squashfuse = @import("../squashfuse.zig");
+const squashfuse = @import("../root.zig");
 const SquashFs = squashfuse.SquashFs;
 const assert = std.debug.assert;
 
@@ -16,7 +16,7 @@ pub const Entry = struct {
     kind: Kind,
     name: []u8,
 
-    inode: u64,
+    inode: SquashFs.Inode.TableEntry,
     inode_number: u32,
     offset: u64,
     next_offset: u64,
@@ -91,6 +91,7 @@ pub fn open(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
     return .{
         .sqfs = sqfs,
         .cur = .{
+            .sqfs = sqfs,
             .block = @intCast(inode.internal.xtra.dir.start_block + sqfs.super_block.directory_table_start),
             .offset = inode.internal.xtra.dir.offset,
         },
@@ -125,7 +126,7 @@ pub const Iterator = struct {
             const header_slice: []u8 = @as([*]u8, @ptrCast(&dir.header))[0..@sizeOf(@TypeOf(dir.header))];
 
             dir.offset += header_slice.len;
-            try iterator.sqfs.mdRead(iterator.allocator, &dir.cur, header_slice);
+            try dir.cur.read(iterator.allocator, header_slice);
 
             dir.header = squashfuse.littleToNative(dir.header);
             dir.header.count += 1;
@@ -141,10 +142,13 @@ pub const Iterator = struct {
         entry.kind = ll_entry.kind.toKind();
 
         entry.name.len = ll_entry.size + 1;
-        entry.inode = (@as(u64, @intCast(dir.header.start_block)) << 16) + ll_entry.offset;
-        entry.inode_number = dir.header.inode_number + ll_entry.inode_number;
 
-        //    const entry_slice: []u8 = @as([*]u8, @ptrCast(entry.name.ptr))[0..entry.name.len];
+        entry.inode = .{
+            .block = dir.header.start_block,
+            .offset = ll_entry.offset,
+        };
+
+        entry.inode_number = dir.header.inode_number + ll_entry.inode_number;
 
         try dirMdRead(iterator.allocator, iterator.sqfs, dir, entry.name);
 
@@ -158,7 +162,8 @@ fn dirMdRead(
     dir: *SquashFs.Dir,
     buf: []u8,
 ) !void {
+    _ = sqfs;
     dir.offset += @intCast(buf.len);
 
-    try sqfs.mdRead(allocator, &dir.cur, buf);
+    try dir.cur.read(allocator, buf);
 }

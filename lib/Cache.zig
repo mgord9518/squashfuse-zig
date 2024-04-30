@@ -1,7 +1,7 @@
 pub const Cache = @This();
 
 const std = @import("std");
-const squashfuse = @import("squashfuse.zig");
+const squashfuse = @import("root.zig");
 const SquashFs = squashfuse.SquashFs;
 const Inode = SquashFs.Inode;
 const assert = std.debug.assert;

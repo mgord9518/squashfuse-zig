@@ -1,33 +1,40 @@
 const std = @import("std");
-const squashfuse = @import("squashfuse-zig/build.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const squashfuse_dep = b.dependency("squashfuse", .{
+        .target = target,
+        .optimize = optimize,
+
+        // These options will be renamed in the future
+        .@"enable-xz" = false,
+    });
+
+    const squashfuse_module = b.addModule("squashfuse", .{
+        .root_source_file = squashfuse_dep.path("lib/root.zig"),
+    });
+
     const exe = b.addExecutable(.{
-        .name = "squashfuse_example",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .name = "example",
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const squashfuse_opts = squashfuse.LinkOptions{
-        .enable_lz4 = false,
-        .enable_lzo = false,
-        .enable_zlib = true,
-        .enable_zstd = false,
-        .enable_xz = false,
-    };
-
-    exe.addModule(
-        "squashfuse",
-        // Generates a module with the provided link options
-        squashfuse.module(b, squashfuse_opts),
-    );
-
-    // Automatically link in all required files based on the build options
-    squashfuse.link(exe, squashfuse_opts);
+    exe.root_module.addImport("squashfuse", squashfuse_module);
 
     b.installArtifact(exe);
+
+    const run_cmd = b.addRunArtifact(exe);
+
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run the app");
+    run_step.dependOn(&run_cmd.step);
 }

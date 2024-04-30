@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) !void {
 
     const squashfuse_module = b.addModule("squashfuse", .{
         .root_source_file = .{
-            .path = "lib/squashfuse.zig",
+            .path = "lib/root.zig",
         },
         .imports = &.{
             .{

@@ -1,6 +1,6 @@
 const std = @import("std");
 const io = std.io;
-const squashfuse = @import("../squashfuse.zig");
+const squashfuse = @import("../root.zig");
 const DecompressError = squashfuse.DecompressError;
 
 extern fn lzma_stream_buffer_decode(

@@ -10,7 +10,7 @@ const S = std.os.linux.S;
 pub const build_options = @import("build_options");
 
 const Cache = @import("Cache.zig");
-const Table = @import("Table.zig");
+const Table = @import("table.zig").Table;
 
 pub const SquashFsError = error{
     Error,
@@ -54,10 +54,10 @@ pub const SquashFs = struct {
     decompressFn: Decompressor,
     super_block: SuperBlock,
 
-    id_table: Table,
-    frag_table: Table,
-    export_table: ?Table,
-    xattr_table: Table,
+    id_table: Table(u32),
+    frag_table: Table(FragmentTableEntry),
+    export_table: ?Table(u64),
+    xattr_table: Table(XattrId),
 
     blockidx: *Cache,
     md_cache: *Cache,
@@ -122,7 +122,7 @@ pub const SquashFs = struct {
         id_count: u16,
         version_major: u16,
         version_minor: u16,
-        root_inode_id: u64,
+        root_inode_id: Inode.TableEntry,
         bytes_used: u64,
         id_table_start: u64,
         xattr_id_table_start: u64,
@@ -288,7 +288,7 @@ pub const SquashFs = struct {
         };
     };
 
-    pub const FragmentEntry = extern struct {
+    pub const FragmentTableEntry = extern struct {
         start_block: u64,
         size: u32,
         unused: u32,
@@ -341,28 +341,25 @@ pub const SquashFs = struct {
             sqfs.super_block.version_minor = @byteSwap(sqfs.super_block.version_minor);
         }
 
-        sqfs.id_table = try Table.init(
+        sqfs.id_table = try Table(u32).init(
             allocator,
             &sqfs,
             @intCast(sqfs.super_block.id_table_start + opts.offset),
-            4,
             sqfs.super_block.id_count,
         );
 
-        sqfs.frag_table = try Table.init(
+        sqfs.frag_table = try Table(SquashFs.FragmentTableEntry).init(
             allocator,
             &sqfs,
             @intCast(sqfs.super_block.fragment_table_start + opts.offset),
-            @sizeOf(SquashFs.FragmentEntry),
             sqfs.super_block.fragment_entry_count,
         );
 
         if (sqfs.super_block.export_table_start != SquashFs.invalid_block) {
-            sqfs.export_table = try Table.init(
+            sqfs.export_table = try Table(u64).init(
                 allocator,
                 &sqfs,
                 @intCast(sqfs.super_block.export_table_start + opts.offset),
-                8,
                 sqfs.super_block.inode_count,
             );
         }
@@ -392,7 +389,7 @@ pub const SquashFs = struct {
             export_table.deinit();
         }
 
-        // Deinit caches
+        // Deinit block caches
         sqfs.arena.deinit();
 
         sqfs.arena2.deinit();
@@ -402,7 +399,7 @@ pub const SquashFs = struct {
 
     // Another small wrapper, this shouldn't be used unless necessary (stuff
     // missing from the bindings)
-    pub inline fn getInode(sqfs: *SquashFs, id: u64) !Inode {
+    pub inline fn getInode(sqfs: *SquashFs, id: Inode.TableEntry) !Inode {
         const allocator = sqfs.arena2.allocator();
 
         // TODO implement block dispose, fix memory leak
@@ -444,13 +441,13 @@ pub const SquashFs = struct {
         sqfs: *SquashFs,
         inode: *Inode.Internal,
     ) !TypeFromFileKind(kind) {
+        _ = sqfs;
         const T = TypeFromFileKind(kind);
 
         var x: T = undefined;
 
-        try sqfs.mdRead(
+        try inode.next.read(
             allocator,
-            &inode.next,
             @as([*]u8, @ptrCast(&x))[0..@sizeOf(T)],
         );
 
@@ -460,7 +457,7 @@ pub const SquashFs = struct {
     fn getInodeFromId(
         allocator: std.mem.Allocator,
         sqfs: *SquashFs,
-        id: u64,
+        id: Inode.TableEntry,
     ) !Inode.Internal {
         var inode = Inode.Internal{
             .base = std.mem.zeroes(SquashFs.SuperBlock.InodeBase),
@@ -472,17 +469,16 @@ pub const SquashFs = struct {
 
         inode.xattr = SquashFs.invalid_xattr;
 
-        var cur = SquashFs.MdCursor.fromInodeId(
-            id,
-            sqfs.super_block.inode_table_start,
-        );
+        var cur = MdCursor{
+            .sqfs = sqfs,
+            .block = id.block + sqfs.super_block.inode_table_start,
+            .offset = id.offset,
+        };
 
         inode.next = cur;
 
-        try sqfs.mdRead(
+        try cur.read(
             allocator,
-            //sqfs.arena.allocator(),
-            &cur,
             @as([*]u8, @ptrCast(&inode.base))[0..@sizeOf(@TypeOf(inode.base))],
         );
 
@@ -616,14 +612,14 @@ pub const SquashFs = struct {
         ) catch unreachable;
     }
 
-    fn fragEntry(sqfs: *SquashFs, frag: *FragmentEntry, idx: u32) !void {
+    fn fragEntry(sqfs: *SquashFs, frag: *FragmentTableEntry, idx: u32) !void {
         if (idx == SquashFs.invalid_frag) return error.Error;
 
         try sqfs.frag_table.get(
             sqfs.arena2.allocator(),
             sqfs,
             idx,
-            @ptrCast(frag),
+            frag,
         );
     }
 
@@ -685,6 +681,12 @@ pub const SquashFs = struct {
         kind: File.Kind,
         pos: u64 = 0,
 
+        pub const TableEntry = packed struct {
+            offset: u16,
+            block: u32,
+            UNUSED: u16 = 0,
+        };
+
         // TODO: move this into parent inode
         const Internal = extern struct {
             base: SquashFs.SuperBlock.InodeBase,
@@ -708,7 +710,7 @@ pub const SquashFs = struct {
             var sqfs = inode.parent;
             var block: *Cache.Block = undefined;
 
-            var frag: FragmentEntry = undefined;
+            var frag: FragmentTableEntry = undefined;
 
             if (inode.kind != .file) return error.Error;
 
@@ -744,9 +746,8 @@ pub const SquashFs = struct {
 
             var cur = inode.internal.next;
 
-            try inode.parent.mdRead(
+            try cur.read(
                 inode.parent.arena.allocator(),
-                &cur,
                 buf[0..len],
             );
 
@@ -912,7 +913,7 @@ pub const SquashFs = struct {
         }
 
         fn getId(allocator: std.mem.Allocator, sqfs: *SquashFs, idx: u16) !u32 {
-            var id: [4]u8 = undefined;
+            var id: u32 = undefined;
 
             try sqfs.id_table.get(
                 allocator,
@@ -923,7 +924,7 @@ pub const SquashFs = struct {
 
             return std.mem.littleToNative(
                 u32,
-                @bitCast(id),
+                id,
             );
         }
 
@@ -1038,7 +1039,7 @@ pub const SquashFs = struct {
             name_buf: [257]u8 = undefined,
 
             pub const Entry = struct {
-                id: u64,
+                id: Inode.TableEntry,
                 parent: *SquashFs,
 
                 name: [:0]const u8,
@@ -1112,7 +1113,7 @@ pub const SquashFs = struct {
             };
 
             pub const Entry = struct {
-                id: u64,
+                id: Inode.TableEntry,
                 parent: *SquashFs,
 
                 dir: Inode,
@@ -1337,9 +1338,8 @@ pub const SquashFs = struct {
 
                 bl.remain -= 1;
 
-                try bl.sqfs.mdRead(
+                try bl.cur.read(
                     allocator,
-                    &bl.cur,
                     @as([*]u8, @ptrCast(&bl.header))[0..4],
                 );
 
@@ -1362,52 +1362,45 @@ pub const SquashFs = struct {
     pub const Dir = @import("fs/Dir.zig");
 
     pub const MdCursor = extern struct {
+        sqfs: *SquashFs,
         block: u64,
         offset: usize,
 
-        pub fn fromInodeId(id: u64, base: u64) MdCursor {
-            return .{
-                .block = @intCast((id >> 16) + base),
-                .offset = @intCast(id & 0xffff),
-            };
+        pub fn read(
+            cur: *SquashFs.MdCursor,
+            allocator: std.mem.Allocator,
+            buf: []u8,
+        ) !void {
+            var pos = cur.block;
+
+            var size = buf.len;
+            var nbuf = buf;
+
+            while (size > 0) {
+                const block = try cur.sqfs.mdCache(allocator, &pos);
+
+                var take = block.data.len - cur.offset;
+                if (take > size) {
+                    take = size;
+                }
+
+                @memcpy(
+                    nbuf[0..take],
+                    block.data[cur.offset..][0..take],
+                );
+
+                nbuf = nbuf[take..];
+
+                size -= take;
+                cur.offset += take;
+
+                if (cur.offset == block.data.len) {
+                    cur.block = pos;
+                    cur.offset = 0;
+                }
+            }
         }
     };
-
-    pub fn mdRead(
-        sqfs: *SquashFs,
-        allocator: std.mem.Allocator,
-        cur: *SquashFs.MdCursor,
-        buf: []u8,
-    ) !void {
-        var pos = cur.block;
-
-        var size = buf.len;
-        var nbuf = buf;
-
-        while (size > 0) {
-            const block = try sqfs.mdCache(allocator, &pos);
-
-            var take = block.data.len - cur.offset;
-            if (take > size) {
-                take = size;
-            }
-
-            @memcpy(
-                nbuf[0..take],
-                block.data[cur.offset..][0..take],
-            );
-
-            nbuf = nbuf[take..];
-
-            size -= take;
-            cur.offset += take;
-
-            if (cur.offset == block.data.len) {
-                cur.block = pos;
-                cur.offset = 0;
-            }
-        }
-    }
 
     pub fn mdSkip(
         sqfs: *SquashFs,
@@ -1467,11 +1460,10 @@ pub const SquashFs = struct {
 
         sqfs.xattr_info = littleToNative(sqfs.xattr_info);
 
-        sqfs.xattr_table = @bitCast(try Table.init(
+        sqfs.xattr_table = @bitCast(try Table(XattrId).init(
             sqfs.allocator,
             sqfs.file.handle,
             @intCast(start + xattr_size + sqfs.offset),
-            @sizeOf(XattrId),
             sqfs.xattr_info.xattr_ids,
         ));
     }

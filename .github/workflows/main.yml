@@ -11,54 +11,37 @@ jobs:
     - uses: actions/checkout@v2
     - uses: goto-bus-stop/setup-zig@v2
 
-    - name: Install squashfs-tools
+    - name: Install deps
       run: |
         sudo apt update
-        sudo apt install squashfs-tools
+        sudo apt install squashfs-tools zip
 
-      # TODO: possibly remove GLibC? I'll have to do some testing and see if
-      # there are any large benefits to keeping it, because it's now only being
-      # used for the compression libraries
     - name: Build (Linux, Musl libc, static, x86_64)
       run: ARCH=x86_64 OS=linux LIBC=musl ./build.sh
-
-    - name: Build (Linux, GLibC 2.16, x86_64)
-      run: ARCH=x86_64 OS=linux LIBC=gnu.2.16 ./build.sh
 
     - name: Build (Linux, Musl libc, static, aarch64)
       run: ARCH=aarch64 OS=linux LIBC=musl ./build.sh
 
-    - name: Build (Linux, GLibC 2.17, aarch64)
-      run: ARCH=aarch64 OS=linux LIBC=gnu.2.17 ./build.sh
-
     - name: Build (Linux, Musl libc, static, x86)
       run: ARCH=x86 OS=linux LIBC=musl ./build.sh
-
-    - name: Build (Linux, GLibC 2.16, x86)
-      run: ARCH=x86 OS=linux LIBC=gnu.2.16 ./build.sh
 
     - name: Build (Linux, Musl libc, static, arm)
       run: ARCH=arm OS=linux LIBC=musleabi ./build.sh
 
-    - name: Build (Linux, GLibC 2.16, arm)
-      run: ARCH=arm OS=linux LIBC=gnueabi.2.16 ./build.sh
-
     - name: Build (Linux, Musl libc, static, riscv64)
       run: ARCH=riscv64 OS=linux LIBC=musl ./build.sh
 
-    - name: Build (Windows, static, x86_64, no FUSE)
-      run: |
-        zig build -Dtarget=x86_64-windows -Denable-zlib=true -Denable-lzo=true -Denable-xz=true -Denable-lz4=true -Denable-zstd=true -Dstrip=true -Denable-fuse=false -Doptimize=ReleaseFast
-        mv zig-out/bin/squashfuse.exe squashfuse-win.static.x86_64
+    # TODO: support Windows FUSE through WinFSP
+    - name: Build (Windows, GLibC, x86_64, no FUSE)
+      run: ARCH=x86_64 OS=windows LIBC=gnu ./build.sh
 
-    - name: Build (Windows, static, aarch64, no FUSE)
-      run: |
-        zig build -Dtarget=aarch64-windows -Denable-zlib=true -Denable-lzo=true -Denable-xz=true -Denable-lz4=true -Denable-zstd=true -Dstrip=true -Denable-fuse=false -Doptimize=ReleaseFast
-        mv zig-out/bin/squashfuse.exe squashfuse-win.static.aarch64
+    - name: Build (Windows, GLibC, aarch64, no FUSE)
+      run: ARCH=aarch64 OS=windows LIBC=gnu ./build.sh
 
-        # TODO: riscv64 GLibC and riscv32
-        #    - name: Build (GLibC 2.16, riscv64)
-        #      run: ARCH=riscv64 OS=linux LIBC=gnu.2.16 ./build.sh
+    - name: Build (Windows, GLibC, x86, no FUSE)
+      run: ARCH=x86 OS=windows LIBC=gnu ./build.sh
+
+    # TODO: macOS
 
     - name: Build test images
       run: |
@@ -69,9 +52,9 @@ jobs:
     - name: Test
       run: |
         zig build test
-        zig build test -Dtarget=x86_64-linux-gnu.2.16 -Doptimize=ReleaseSafe
-        zig build test -Dtarget=x86_64-linux-gnu.2.16 -Doptimize=ReleaseFast
-        zig build test -Dtarget=x86_64-linux-gnu.2.16 -Doptimize=ReleaseSmall
+        zig build test -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
+        zig build test -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
+        zig build test -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall
 
         zig build test
         zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
