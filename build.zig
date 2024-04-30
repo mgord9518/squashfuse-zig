@@ -10,10 +10,12 @@ pub fn build(b: *std.Build) !void {
         .{ "enable-fuse", "build with support for FUSE mounting", true },
 
         .{ "use-libdeflate", "replace zlib with faster libdeflate implementation", true },
+        .{ "use-zig-zlib", "replace zlib with Zig stdlib zlib", false },
         .{ "use-zig-xz", "replace liblzma with Zig stdlib XZ", true },
         .{ "use-zig-zstd", "replace liblzma with Zig stdlib ZSTD", false },
 
         .{ "enable-zlib", "enable zlib decompression. medium ratio, medium speed", true },
+        .{ "enable-lzma", "deprecated and not yet supported", false },
         .{ "enable-lzo", "enable lzo decompression. low ratio, fast speed", true },
         .{ "enable-xz", "enable xz decompression. very high ratio, slow speed", true },
         .{ "enable-lz4", "enable lz4 decompression. low ratio, very fast speed", true },
@@ -41,7 +43,7 @@ pub fn build(b: *std.Build) !void {
 
     const exe = b.addExecutable(.{
         .name = "squashfuse",
-        .root_source_file = .{ .path = "src/squashfuse.zig" },
+        .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
         .strip = option_list.get("strip").?,
@@ -49,7 +51,7 @@ pub fn build(b: *std.Build) !void {
 
     const squashfuse_module = b.addModule("squashfuse", .{
         .root_source_file = .{
-            .path = "lib.zig",
+            .path = "lib/squashfuse.zig",
         },
         .imports = &.{
             .{
@@ -80,6 +82,21 @@ pub fn build(b: *std.Build) !void {
     });
 
     if (option_list.get("enable-fuse").?) {
+        const os = target.result.os.tag;
+        if (os != .linux) {
+            const error_string = try std.fmt.allocPrint(
+                b.allocator,
+                \\FUSE support for {s} not yet implemented
+                \\please build with `-Denable-fuse=false`
+            ,
+                .{@tagName(os)},
+            );
+
+            // TODO: surely panic should be replaced with a better option
+            // here?
+            @panic(error_string);
+        }
+
         if (option_list.get("use-system-fuse").?) {
             exe.linkSystemLibrary("fuse3");
         } else {
@@ -87,7 +104,7 @@ pub fn build(b: *std.Build) !void {
         }
     }
 
-    if (option_list.get("enable-zlib").?) {
+    if (option_list.get("enable-zlib").? and !option_list.get("use-zig-zlib").?) {
         if (option_list.get("use-libdeflate").?) {
             exe.linkLibrary(try buildLibdeflate(b, .{
                 .name = "deflate",

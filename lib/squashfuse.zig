@@ -4,6 +4,9 @@ const os = std.os;
 const posix = std.posix;
 const fs = std.fs;
 
+// TODO: is this always correct?
+const S = std.os.linux.S;
+
 pub const build_options = @import("build_options");
 
 const Cache = @import("Cache.zig");
@@ -488,13 +491,13 @@ pub const SquashFs = struct {
 
         // zig fmt: off
         inode.base.mode |= switch (kind) {
-            .file, .l_file             => posix.S.IFREG,
-            .directory, .l_directory   => posix.S.IFDIR,
-            .sym_link, .l_sym_link     => posix.S.IFLNK,
-            .named_pipe, .l_named_pipe => posix.S.IFIFO,
-            .block_device, .l_block_device             => posix.S.IFBLK,
-            .character_device, .l_character_device     => posix.S.IFCHR,
-            .unix_domain_socket, .l_unix_domain_socket => posix.S.IFSOCK,
+            .file, .l_file             => S.IFREG,
+            .directory, .l_directory   => S.IFDIR,
+            .sym_link, .l_sym_link     => S.IFLNK,
+            .named_pipe, .l_named_pipe => S.IFIFO,
+            .block_device, .l_block_device             => S.IFBLK,
+            .character_device, .l_character_device     => S.IFCHR,
+            .unix_domain_socket, .l_unix_domain_socket => S.IFSOCK,
         };
         // zig fmt: on
 
@@ -1205,8 +1208,10 @@ pub const SquashFs = struct {
 
                     // Change the mode of the file to match the inode contained
                     // in the SquashFS image
-                    const st = try self.stat();
-                    try f.chmod(st.mode);
+                    if (std.fs.has_executable_bit) {
+                        const st = try self.stat();
+                        try f.chmod(st.mode);
+                    }
                 },
 
                 .directory => {
@@ -1354,7 +1359,7 @@ pub const SquashFs = struct {
         };
     };
 
-    pub const Dir = @import("Dir.zig");
+    pub const Dir = @import("fs/Dir.zig");
 
     pub const MdCursor = extern struct {
         block: u64,
@@ -1621,7 +1626,7 @@ pub fn mdBlockRead(
 // essentially zero, but it should be noted anyway.
 //
 // TODO: add more Zig-implemented algos if they're performant
-const algos = @import("algos.zig");
+pub const algos = @import("algos.zig");
 
 pub fn littleToNative(x: anytype) @TypeOf(x) {
     const T = @TypeOf(x);

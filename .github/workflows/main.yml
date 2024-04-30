@@ -19,32 +19,42 @@ jobs:
       # TODO: possibly remove GLibC? I'll have to do some testing and see if
       # there are any large benefits to keeping it, because it's now only being
       # used for the compression libraries
-    - name: Build (Musl libc, static, x86_64)
+    - name: Build (Linux, Musl libc, static, x86_64)
       run: ARCH=x86_64 OS=linux LIBC=musl ./build.sh
 
-    - name: Build (GLibC 2.16, x86_64)
+    - name: Build (Linux, GLibC 2.16, x86_64)
       run: ARCH=x86_64 OS=linux LIBC=gnu.2.16 ./build.sh
 
-    - name: Build (Musl libc, static, aarch64)
+    - name: Build (Linux, Musl libc, static, aarch64)
       run: ARCH=aarch64 OS=linux LIBC=musl ./build.sh
 
-    - name: Build (GLibC 2.17, aarch64)
+    - name: Build (Linux, GLibC 2.17, aarch64)
       run: ARCH=aarch64 OS=linux LIBC=gnu.2.17 ./build.sh
 
-    - name: Build (Musl libc, static, x86)
+    - name: Build (Linux, Musl libc, static, x86)
       run: ARCH=x86 OS=linux LIBC=musl ./build.sh
 
-    - name: Build (GLibC 2.16, x86)
+    - name: Build (Linux, GLibC 2.16, x86)
       run: ARCH=x86 OS=linux LIBC=gnu.2.16 ./build.sh
 
-    - name: Build (Musl libc, static, arm)
+    - name: Build (Linux, Musl libc, static, arm)
       run: ARCH=arm OS=linux LIBC=musleabi ./build.sh
 
-    - name: Build (GLibC 2.16, arm)
+    - name: Build (Linux, GLibC 2.16, arm)
       run: ARCH=arm OS=linux LIBC=gnueabi.2.16 ./build.sh
 
-    - name: Build (Musl libc, static, riscv64)
+    - name: Build (Linux, Musl libc, static, riscv64)
       run: ARCH=riscv64 OS=linux LIBC=musl ./build.sh
+
+    - name: Build (Windows, static, x86_64, no FUSE)
+      run: |
+        zig build -Dtarget=x86_64-windows -Denable-zlib=true -Denable-lzo=true -Denable-xz=true -Denable-lz4=true -Denable-zstd=true -Dstrip=true -Denable-fuse=false -Doptimize=ReleaseFast
+        mv zig-out/bin/squashfuse.exe squashfuse-win.static.x86_64
+
+    - name: Build (Windows, static, aarch64, no FUSE)
+      run: |
+        zig build -Dtarget=aarch64-windows -Denable-zlib=true -Denable-lzo=true -Denable-xz=true -Denable-lz4=true -Denable-zstd=true -Dstrip=true -Denable-fuse=false -Doptimize=ReleaseFast
+        mv zig-out/bin/squashfuse.exe squashfuse-win.static.aarch64
 
         # TODO: riscv64 GLibC and riscv32
         #    - name: Build (GLibC 2.16, riscv64)

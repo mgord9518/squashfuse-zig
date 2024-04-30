@@ -1,6 +1,6 @@
 const std = @import("std");
 const os = std.os;
-const squashfuse = @import("squashfuse.zig");
+const squashfuse = @import("../squashfuse.zig");
 const SquashFs = squashfuse.SquashFs;
 const assert = std.debug.assert;
 
