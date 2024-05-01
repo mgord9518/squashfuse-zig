@@ -44,7 +44,7 @@ pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decomp
         },
         .zstd => {
             if (comptime builtWithDecompression(.zstd)) {
-                if (!build_options.@"use-zig-zstd") {
+                if (build_options.@"use-zig-zstd") {
                     return @import("algos/zstd_zig.zig").decode;
                 }
 

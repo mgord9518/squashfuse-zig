@@ -7,9 +7,6 @@ My main goals for this project are as follows:
    is already done using libdeflate in place of zlib)
  * Fully-compatible with existing squashfuse tools
  * Keep code as clean as possible (whew, yeah we're not there yet)
- * Iteratively re-implement squashfuse functionality in Zig, so eventually this
-   should be a complete re-implementation. Most functions have been ported
-   but a few are still bindings or rely on squashfuse headers
 
 With some very basic benchmarking, extracting a zlib-compressed AppImage
 (FreeCAD, the largest AppImage I've been able to find so far), takes 3.1
@@ -24,39 +21,69 @@ using libdeflate, but performance by default is important. I'd like to compare
 it to the actual squashfuse's `squashfuse_extract` program to see how it
 compares.
 
-TODO: update this example
 Importing example:
 ```zig
+// build.zig.zon
+.{
+    .name = "example",
+    .version = "0.0.0",
+
+    .dependencies = .{
+        .squashfuse = .{
+            .url = "https://github.com/mgord9518/squashfuse-zig/archive/refs/tags/continuous.tar.gz",
+
+            // Leave this commented initially, then Zig will complain and give
+            // you the correct value
+            //.hash = "1220e675672f86be446965d5b779a384c81c7648e385428ed5a8858842cfa38a4e22",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+    },
+}
+```
+```zig
+// build.zig
 const std = @import("std");
-const squashfuse = @import("squashfuse-zig/build.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Import and configure dependency
+    const squashfuse_dep = b.dependency("squashfuse", .{
+        .target = target,
+        .optimize = optimize,
+
+        // These options will be renamed in the future
+        .@"enable-zlib" = true,
+        .@"use-libdeflate" = true,
+        .@"enable-xz" = false,
+        .@"enable-lzma" = false,
+        .@"enable-lzo" = false,
+        .@"enable-lz4" = false,
+        .@"enable-zstd" = false,
+    });
+
     const exe = b.addExecutable(.{
-        .name = "squashfuse_example",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .name = "example",
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const squashfuse_opts = squashfuse.LinkOptions{
-        .enable_lz4 = false,
-        .enable_lzo = false,
-        .enable_zlib = true,
-        .enable_zstd = false,
-        .enable_xz = false,
-    };
-
-    exe.addModule(
+    exe.root_module.addImport(
         "squashfuse",
-        // Generates a module with the provided link options
-        squashfuse.module(b, squashfuse_opts),
+        squashfuse_dep.module("squashfuse"),
     );
 
-    // Automatically link in all required files based on the build options
-    squashfuse.link(exe, squashfuse_opts);
+    // Link up required libraries
+    // TODO: automate this
+    exe.linkLibrary(squashfuse_dep.artifact("deflate"));
 
     b.installArtifact(exe);
 }

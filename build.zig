@@ -100,18 +100,22 @@ pub fn build(b: *std.Build) !void {
         if (option_list.get("use-system-fuse").?) {
             exe.linkSystemLibrary("fuse3");
         } else {
+            //b.installArtifact(fuse_dep.artifact("fuse"));
             exe.linkLibrary(fuse_dep.artifact("fuse"));
         }
     }
 
     if (option_list.get("enable-zlib").? and !option_list.get("use-zig-zlib").?) {
         if (option_list.get("use-libdeflate").?) {
-            exe.linkLibrary(try buildLibdeflate(b, .{
+            const lib = try buildLibdeflate(b, .{
                 .name = "deflate",
                 .target = target,
                 .optimize = optimize,
                 .strip = option_list.get("strip").?,
-            }));
+            });
+
+            b.installArtifact(lib);
+            exe.linkLibrary(lib);
         } else {
             // TODO: maybe vendor zlib? Idk, I don't see the benefit. Anyone
             // I imagine specifically choosing zlib probably wants it as it's
@@ -121,12 +125,15 @@ pub fn build(b: *std.Build) !void {
     }
 
     if (option_list.get("enable-lzo").?) {
-        exe.linkLibrary(try buildLiblzo(b, .{
+        const lib = try buildLiblzo(b, .{
             .name = "lzo",
             .target = target,
             .optimize = optimize,
             .strip = option_list.get("strip").?,
-        }));
+        });
+
+        b.installArtifact(lib);
+        exe.linkLibrary(lib);
     }
 
     //    if (option_list.get("enable-xz").? and !option_list.get("use-zig-xz").?) {
@@ -139,21 +146,27 @@ pub fn build(b: *std.Build) !void {
     //    }
 
     if (option_list.get("enable-lz4").?) {
-        exe.linkLibrary(try buildLiblz4(b, .{
+        const lib = try buildLiblz4(b, .{
             .name = "lz4",
             .target = target,
             .optimize = optimize,
             .strip = option_list.get("strip").?,
-        }));
+        });
+
+        b.installArtifact(lib);
+        exe.linkLibrary(lib);
     }
 
     if (option_list.get("enable-zstd").? and !option_list.get("use-zig-zstd").?) {
-        exe.linkLibrary(try buildLibzstd(b, .{
+        const lib = try buildLibzstd(b, .{
             .name = "zstd",
             .target = target,
             .optimize = optimize,
             .strip = option_list.get("strip").?,
-        }));
+        });
+
+        b.installArtifact(lib);
+        exe.linkLibrary(lib);
     }
 
     exe.root_module.addImport("squashfuse", squashfuse_module);

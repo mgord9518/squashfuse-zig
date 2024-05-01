@@ -9,11 +9,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
 
         // These options will be renamed in the future
+        .@"enable-zlib" = true,
+        .@"use-libdeflate" = true,
         .@"enable-xz" = false,
-    });
-
-    const squashfuse_module = b.addModule("squashfuse", .{
-        .root_source_file = squashfuse_dep.path("lib/root.zig"),
+        .@"enable-lzma" = false,
+        .@"enable-lzo" = false,
+        .@"enable-lz4" = false,
+        .@"enable-zstd" = false,
     });
 
     const exe = b.addExecutable(.{
@@ -23,7 +25,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.root_module.addImport("squashfuse", squashfuse_module);
+    exe.root_module.addImport(
+        "squashfuse",
+        squashfuse_dep.module("squashfuse"),
+    );
+    exe.linkLibrary(squashfuse_dep.artifact("deflate"));
 
     b.installArtifact(exe);
 

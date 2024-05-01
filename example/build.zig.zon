@@ -6,7 +6,7 @@
     .dependencies = .{
         .squashfuse = .{
             .url = "https://github.com/mgord9518/squashfuse-zig/archive/refs/tags/continuous.tar.gz",
-            .hash = "1220d454f62f258e2684b860635d0277e1af678a8a7db7be5b3114d03dd4724071a8",
+            .hash = "1220e675672f86be446965d5b779a384c81c7648e385428ed5a8858842cfa38a4e22",
         },
     },
 

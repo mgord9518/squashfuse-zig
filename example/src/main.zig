@@ -1,24 +1,33 @@
 const std = @import("std");
+const squashfuse = @import("squashfuse");
+const SquashFs = squashfuse.SquashFs;
 
+// TODO take SquashFS as arg instead of hard coding
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
+    var args_it = try std.process.argsWithAllocator(allocator);
+    defer args_it.deinit();
+
+    const argv0 = args_it.next().?;
+    const argv1 = args_it.next();
+
+    if (argv1 == null) {
+        std.debug.print("usage: {s} <squashfs>\n", .{argv0});
+        return;
+    }
+
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    // Must first run `test/make_images.sh` in order for this to work
+    var sqfs = try SquashFs.init(allocator, argv1.?, .{});
+    defer sqfs.deinit();
+
+    try stdout.print("SqusahFS info:\n", .{});
+    try stdout.print("  compression: {s}\n", .{@tagName(sqfs.super_block.compression)});
 
     try bw.flush(); // don't forget to flush!
-}
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
 }

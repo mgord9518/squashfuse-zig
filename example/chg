@@ -1,4 +1,0 @@
-Simplify builds, better internal type safety
- * Builds are now packaged in archive formats (zip for Windows, tar.xz for Linux)
- * Internal functions have been improved
- * 
