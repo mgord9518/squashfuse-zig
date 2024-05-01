@@ -50,19 +50,8 @@ pub fn entry(cache: *Cache, i: usize) ?*anyopaque {
 
 pub const Dispose = *const fn (data: ?*anyopaque) callconv(.C) void;
 
-// sqfs_block
-pub const Block = struct {
-    data: []u8,
-    refcount: c_long,
-
-    pub const Header = packed struct {
-        size: u15,
-        is_uncompressed: bool,
-    };
-};
-
 pub const BlockCacheEntry = extern struct {
-    block: *Block,
+    block: *SquashFs.Block,
     data_size: usize,
 
     pub const Header = extern struct {

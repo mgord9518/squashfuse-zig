@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 pub const Dir = @This();
 
 sqfs: *SquashFs,
-cur: SquashFs.MdCursor,
+cur: SquashFs.MetadataCursor,
 offset: u64,
 total: u64,
 header: Header,
