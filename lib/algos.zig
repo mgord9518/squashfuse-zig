@@ -1,8 +1,8 @@
 pub const Algos = @This();
 
 const std = @import("std");
-const build_options = @import("build_options");
 const squashfuse = @import("root.zig");
+const build_options = squashfuse.build_options;
 const SquashFs = squashfuse.SquashFs;
 const SquashFsError = squashfuse.SquashFsError;
 
