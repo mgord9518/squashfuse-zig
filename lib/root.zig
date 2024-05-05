@@ -7,6 +7,8 @@ const fs = std.fs;
 // TODO: is this always correct?
 const S = std.os.linux.S;
 
+const Stat = std.os.linux.Stat;
+
 pub const build_options = @import("build_options");
 
 const Cache = @import("Cache.zig").Cache;
@@ -912,8 +914,8 @@ pub const SquashFs = struct {
         }
 
         // Like `Inode.stat` but returns the OS native stat format
-        pub fn statC(inode: *Inode) !posix.Stat {
-            var st = std.mem.zeroes(posix.Stat);
+        pub fn statC(inode: *Inode) !Stat {
+            var st = std.mem.zeroes(Stat);
 
             st.mode = inode.internal.base.mode;
             st.nlink = @intCast(inode.internal.nlink);
