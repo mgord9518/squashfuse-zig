@@ -192,7 +192,52 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // TODO: fix tests
+    // Generate test SquashFS images using pseudo file definitions
+    // TODO: move this into a build step and cache already built images
+    const src_dir = comptime std.fs.path.dirname(@src().file) orelse ".";
+    inline for (.{ "zlib", "xz", "lzo", "lz4", "zstd" }) |algo| {
+        // For some reason zlib compression in SquashFS is referred to as
+        // gzip. It uses zlib headers, not gzip
+        const comp = if (std.mem.eql(u8, algo, "zlib")) blk: {
+            break :blk "gzip";
+        } else blk: {
+            break :blk algo;
+        };
+
+        _ = try std.ChildProcess.run(.{
+            .allocator = b.allocator,
+
+            // zig fmt: off
+            .argv = &.{
+                "mksquashfs",
+                "-",
+                src_dir ++ "/test/tree_" ++ algo ++ ".sqfs",
+                "-comp", comp,
+                "-noappend",
+                "-root-owned",
+                // The block size should be automatically tested at different
+                // sizes in the future
+                //"-b", "1M",
+                "-p", "/ d 644 0 0",
+                "-p", "1 d 644 0 0",
+                "-p", "1/TEST f 644 0 0 echo -n TEST",
+                "-p", "2 d 644 0 0",
+                "-p", "2/another\\ dir d 644 0 0",
+                // TODO: cross-platform sparse file creation
+                "-p", "2/another\\ dir/sparse_file f 644 0 0 head -c 65536 /dev/zero",
+                "-p", "2/text f 644 0 0 cat test/test.zig",
+                "-p", "broken_symlink s 644 0 0 I_DONT_EXIST",
+                "-p", "symlink s 644 0 0 2/text",
+                "-p", ("A" ** 256) ++ " f 644 0 0 true",
+                // TODO: test timestamps
+                "-p", "perm_400 F 696969 400 0 0 true",
+                "-p", "perm_644 f        644 0 0 true",
+                "-p", "perm_777 f        777 0 0 true",
+            },
+            // zig fmt: on
+        });
+    }
+
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "test/test.zig" },
         .target = target,

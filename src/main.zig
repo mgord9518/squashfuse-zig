@@ -189,7 +189,7 @@ pub fn main() !void {
 
         var can_decompress = false;
         inline for (comptime std.meta.tags(SquashFs.Compression)) |algo| {
-            if (squashfuse.algos.builtWithDecompression(algo)) {
+            if (squashfuse.compression.builtWithDecompression(algo)) {
                 can_decompress = true;
 
                 try stderr.print(

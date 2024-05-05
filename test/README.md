@@ -1,7 +1,6 @@
 # Simple SquashFS images for testing
 
-`tree` is a directory containing a filesystem tree containing assorted
-directories and files. It is built into several SquashFS images with different
-compression algos
+To test squashfuse-zig functionality, first run `make_images.sh`, which will
+generate test SquashFS images for different compression algos.
 
-The AAA... file is 255 chars long
+After, `zig build test` will ensure everything is working as intended

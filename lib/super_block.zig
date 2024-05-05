@@ -1,6 +1,6 @@
 const SquashFs = @import("root.zig").SquashFs;
 
-pub const SuperBlock = packed struct {
+pub const SuperBlock = extern struct {
     magic: u32,
     inode_count: u32,
     modification_time: u32,
@@ -21,12 +21,12 @@ pub const SuperBlock = packed struct {
     fragment_table_start: u64,
     export_table_start: u64,
 
-    pub const Flags = packed struct {
+    pub const Flags = packed struct(u16) {
         uncompressed_inodes: bool,
         uncompressed_data: bool,
 
         // `check` flag; unused in SquashFS 4.0+
-        UNUSED: u1,
+        UNUSED: u1 = undefined,
 
         uncompressed_fragments: bool,
         no_fragments: bool,
@@ -38,7 +38,7 @@ pub const SuperBlock = packed struct {
         compressor_options: bool,
         uncompressed_idx: bool,
 
-        UNUSED_2: u4,
+        UNUSED2: u4 = undefined,
     };
 
     pub const InodeBase = extern struct {

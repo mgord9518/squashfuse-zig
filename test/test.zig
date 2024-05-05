@@ -184,8 +184,7 @@ test "read link" {
     }
 }
 
-// TODO: autogenerate this
-// The file structure of the test image filetree
+// The file structure of the test image file tree
 const file_tree = &[_][]const u8{
     "1",
     "1/TEST",
@@ -194,12 +193,13 @@ const file_tree = &[_][]const u8{
     "2/another dir/sparse_file",
     "2/text",
     // Very long filename
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "A" ** 256,
     "broken_symlink",
+    // Permissions
     "perm_400",
     "perm_644",
     "perm_777",
     "symlink",
 };
 
-const text_contents = @embedFile("tree/2/text");
+const text_contents = @embedFile("test.zig");

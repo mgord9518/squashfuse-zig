@@ -9,7 +9,8 @@ const S = std.os.linux.S;
 
 pub const build_options = @import("build_options");
 
-const Cache = @import("Cache.zig");
+const Cache = @import("Cache.zig").Cache;
+const BlockIdx = @import("Cache.zig").BlockIdx;
 const Table = @import("table.zig").Table;
 
 pub const SquashFsError = error{
@@ -59,10 +60,12 @@ pub const SquashFs = struct {
     export_table: ?Table(u64),
     xattr_table: Table(XattrId),
 
-    blockidx: *Cache,
-    md_cache: *Cache,
-    data_cache: *Cache,
-    frag_cache: *Cache,
+    //blockidx: *Cache(BlockCacheEntry),
+    blockidx: Cache(*BlockIdx.Entry),
+
+    md_cache: Cache(Block),
+    data_cache: Cache(Block),
+    frag_cache: Cache(Block),
 
     xattr_info: XattrIdTable,
     //compression_options: Compression.Options,
@@ -119,7 +122,7 @@ pub const SquashFs = struct {
                 window_size: u16,
                 strategies: Strategies,
 
-                pub const Strategies = packed struct {
+                pub const Strategies = packed struct(u16) {
                     default: bool,
                     filtered: bool,
                     huffman_only: bool,
@@ -145,7 +148,7 @@ pub const SquashFs = struct {
                 dictionary_size: u32,
                 filters: Filters,
 
-                pub const Filters = packed struct {
+                pub const Filters = packed struct(u32) {
                     x86: bool,
                     powerpc: bool,
                     ia64: bool,
@@ -159,7 +162,7 @@ pub const SquashFs = struct {
                 version: u32,
                 flags: Flags,
 
-                pub const Flags = packed struct {
+                pub const Flags = packed struct(u32) {
                     lz4_hc: bool,
                     UNUSED: u31 = undefined,
                 };
@@ -195,37 +198,54 @@ pub const SquashFs = struct {
             .offset = opts.offset,
         };
 
-        sqfs.md_cache = try Cache.BlockCacheEntry.init(
-            sqfs.arena.allocator(),
+        sqfs.md_cache = try Cache(
+            Block,
+        ).init(
+            sqfs.allocator,
             SquashFs.cached_blocks,
         );
 
-        sqfs.data_cache = try Cache.BlockCacheEntry.init(
-            sqfs.arena.allocator(),
+        sqfs.data_cache = try Cache(
+            Block,
+        ).init(
+            sqfs.allocator,
             SquashFs.data_cached_blocks,
         );
 
-        sqfs.frag_cache = try Cache.BlockCacheEntry.init(
-            sqfs.arena.allocator(),
+        sqfs.frag_cache = try Cache(
+            Block,
+        ).init(
+            sqfs.allocator,
             SquashFs.frag_cached_blocks,
         );
 
-        sqfs.blockidx = try Cache.BlockIdx.init(sqfs.arena.allocator());
+        sqfs.blockidx = try Cache(
+            *BlockIdx.Entry,
+        ).init(
+            sqfs.allocator,
+            SquashFs.frag_cached_blocks,
+        );
 
         try sqfs.load(&sqfs.super_block, opts.offset);
 
-        sqfs.super_block = littleToNative(sqfs.super_block);
-
-        const magic_le32: u32 = @bitCast(SquashFs.magic);
-
-        if (sqfs.super_block.magic != magic_le32) {
-            if (sqfs.super_block.magic != @byteSwap(magic_le32)) {
-                return SquashFsError.InvalidFormat;
-            }
-
-            sqfs.super_block.version_major = @byteSwap(sqfs.super_block.version_major);
-            sqfs.super_block.version_minor = @byteSwap(sqfs.super_block.version_minor);
-        }
+        sqfs.super_block.inode_count = littleToNative(sqfs.super_block.inode_count);
+        sqfs.super_block.modification_time = littleToNative(sqfs.super_block.modification_time);
+        sqfs.super_block.block_size = littleToNative(sqfs.super_block.block_size);
+        sqfs.super_block.fragment_entry_count = littleToNative(sqfs.super_block.fragment_entry_count);
+        sqfs.super_block.compression = @enumFromInt(littleToNative(@intFromEnum(sqfs.super_block.compression)));
+        sqfs.super_block.block_log = littleToNative(sqfs.super_block.block_log);
+        sqfs.super_block.flags = littleToNative(sqfs.super_block.flags);
+        sqfs.super_block.id_count = littleToNative(sqfs.super_block.id_count);
+        sqfs.super_block.version_major = littleToNative(sqfs.super_block.version_major);
+        sqfs.super_block.version_minor = littleToNative(sqfs.super_block.version_minor);
+        sqfs.super_block.root_inode_id = littleToNative(sqfs.super_block.root_inode_id);
+        sqfs.super_block.bytes_used = littleToNative(sqfs.super_block.bytes_used);
+        sqfs.super_block.id_table_start = littleToNative(sqfs.super_block.id_table_start);
+        sqfs.super_block.xattr_id_table_start = littleToNative(sqfs.super_block.xattr_id_table_start);
+        sqfs.super_block.inode_table_start = littleToNative(sqfs.super_block.inode_table_start);
+        sqfs.super_block.directory_table_start = littleToNative(sqfs.super_block.directory_table_start);
+        sqfs.super_block.fragment_table_start = littleToNative(sqfs.super_block.fragment_table_start);
+        sqfs.super_block.export_table_start = littleToNative(sqfs.super_block.export_table_start);
 
         sqfs.id_table = try Table(u32).init(
             allocator,
@@ -253,7 +273,7 @@ pub const SquashFs = struct {
         // TODO: XAttr support
         //try sqfs.XattrInit();
 
-        sqfs.decompressFn = try algos.getDecompressor(
+        sqfs.decompressFn = try compression.getDecompressor(
             sqfs.super_block.compression,
         );
 
@@ -276,6 +296,12 @@ pub const SquashFs = struct {
         }
 
         // Deinit block caches
+        sqfs.md_cache.deinit();
+        sqfs.data_cache.deinit();
+        sqfs.frag_cache.deinit();
+
+        sqfs.blockidx.deinit();
+
         sqfs.arena.deinit();
 
         sqfs.arena2.deinit();
@@ -511,30 +537,26 @@ pub const SquashFs = struct {
 
     fn dataCache(
         sqfs: *SquashFs,
-        cache: *Cache,
+        cache: *Cache(Block),
         pos: u64,
         header: Block.DataEntry,
-    ) !*Block {
+    ) !Block {
         const allocator = sqfs.arena2.allocator();
 
-        var entry = Cache.getCache(
-            allocator,
-            cache,
-            pos,
-        );
+        var entry = cache.get(@truncate(pos));
 
-        if (!entry.isValid()) {
-            entry.block = try dataBlockRead(
+        if (!entry.header.valid) {
+            entry.entry = try dataBlockRead(
                 allocator,
                 sqfs,
                 pos,
                 header,
             );
 
-            entry.markValid();
+            entry.header.valid = true;
         }
 
-        return entry.block;
+        return entry.entry;
 
         // TODO: sqfs_block_ref
     }
@@ -543,27 +565,50 @@ pub const SquashFs = struct {
         sqfs: *SquashFs,
         allocator: std.mem.Allocator,
         pos: *u64,
-    ) !*Block {
-        var entry = Cache.getCache(
-            allocator,
-            sqfs.md_cache,
-            pos.*,
-        );
+    ) !Block {
+        //var entry = Cache.getCache(
+        var entry = sqfs.md_cache.get(@truncate(pos.*));
 
-        if (!entry.isValid()) {
-            entry.data_size = try mdBlockRead(
-                allocator,
-                sqfs,
-                pos.*,
-                &entry.block,
+        var data_size: usize = undefined;
+
+        // Block not yet in cache, add it
+        if (!entry.header.valid) {
+            var header: Block.MetadataEntry = undefined;
+
+            try sqfs.load(
+                &header,
+                pos.* + sqfs.offset,
             );
 
-            entry.markValid();
+            header = littleToNative(
+                header,
+            );
+
+            entry.entry = try blockRead(
+                allocator,
+                sqfs,
+                // 2 == @sizeOf(header)
+                pos.* + 2,
+                !header.is_uncompressed,
+                header.size,
+                SquashFs.metadata_size,
+            );
+
+            //entry.entry.data_size = header.size + 2;
+            data_size = header.size + 2;
+
+            entry.header.valid = true;
         }
 
-        pos.* += @intCast(entry.data_size);
+        //std.debug.print("data {d}\n", .{entry.data_size});
+        //std.debug.print("blok {d}\n", .{entry.block.data.len});
 
-        return entry.block;
+        pos.* += @intCast(data_size);
+        //pos.* += @intCast(entry.entry.data_size);
+        //pos.* += @intCast(entry.block.data.len);
+        //pos.* += @intCast(entry.block.data.len + 2);
+
+        return entry.entry;
     }
 
     pub const Inode = struct {
@@ -597,9 +642,10 @@ pub const SquashFs = struct {
             inode: *Inode,
             offset: *usize,
             size: *usize,
-        ) !*Block {
+        ) !Block {
             var sqfs = inode.parent;
-            var block: *Block = undefined;
+            //var block: *Block = undefined;
+            var block: Block = undefined;
 
             var frag: Block.FragmentEntry = undefined;
 
@@ -611,7 +657,7 @@ pub const SquashFs = struct {
             );
 
             block = try sqfs.dataCache(
-                sqfs.frag_cache,
+                &sqfs.frag_cache,
                 frag.start_block,
                 frag.block_header,
             );
@@ -687,7 +733,7 @@ pub const SquashFs = struct {
             }
 
             var bl: SquashFs.File.BlockList = undefined;
-            Cache.BlockIdx.blockList(
+            BlockIdx.blockList(
                 sqfs,
                 inode,
                 &bl,
@@ -697,7 +743,7 @@ pub const SquashFs = struct {
             var read_off = offset % block_size;
 
             while (nbuf.len > 0) {
-                var block: ?*Block = null;
+                var block: ?Block = null;
                 var data_off: usize = 0;
                 var data_size: usize = 0;
                 var take: usize = 0;
@@ -723,7 +769,8 @@ pub const SquashFs = struct {
                         if (data_size > block_size) data_size = block_size;
                     } else {
                         block = sqfs.dataCache(
-                            @ptrCast(@alignCast(sqfs.data_cache)),
+                            //@ptrCast(@alignCast(sqfs.data_cache)),
+                            &sqfs.data_cache,
                             bl.block,
                             bl.header,
                         ) catch return error.SystemResources;
@@ -1428,7 +1475,7 @@ fn dataBlockRead(
     sqfs: *SquashFs,
     pos: u64,
     header: SquashFs.Block.DataEntry,
-) !*SquashFs.Block {
+) !SquashFs.Block {
     return blockRead(
         allocator,
         sqfs,
@@ -1446,12 +1493,16 @@ fn blockRead(
     compressed: bool,
     size: u32,
     out_size: usize,
-) !*SquashFs.Block {
-    var block = try allocator.create(SquashFs.Block);
+) !SquashFs.Block {
+    //var block = try allocator.create(SquashFs.Block);
+    var block = SquashFs.Block{
+        .refcount = 1,
+        .data = try allocator.alloc(u8, size),
+    };
 
-    block.refcount = 1;
+    //    block.refcount = 1;
 
-    block.data = try allocator.alloc(u8, size);
+    //   block.data = try allocator.alloc(u8, size);
 
     //    var written = out_size;
 
@@ -1487,7 +1538,7 @@ fn blockRead(
     return block;
 }
 
-pub fn mdBlockRead(
+pub fn medBlockRead(
     allocator: std.mem.Allocator,
     sqfs: *SquashFs,
     pos: u64,
@@ -1534,7 +1585,7 @@ pub fn mdBlockRead(
 // essentially zero, but it should be noted anyway.
 //
 // TODO: add more Zig-implemented algos if they're performant
-pub const algos = @import("algos.zig");
+pub const compression = @import("compression.zig");
 
 pub fn littleToNative(x: anytype) @TypeOf(x) {
     const T = @TypeOf(x);

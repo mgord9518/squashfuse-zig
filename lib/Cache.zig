@@ -1,159 +1,133 @@
-pub const Cache = @This();
-
 const std = @import("std");
 const squashfuse = @import("root.zig");
 const SquashFs = squashfuse.SquashFs;
 const Inode = SquashFs.Inode;
 const assert = std.debug.assert;
 
-buf: [*]u8,
+pub fn Cache(T: type) type {
+    return struct {
+        const Self = @This();
 
-dispose: Dispose,
-
-size: usize,
-count: usize,
-next: usize,
-
-pub fn init(
-    allocator: std.mem.Allocator,
-    size: usize,
-    count: usize,
-    dispose: Dispose,
-) !*Cache {
-    const cache = try allocator.create(Cache);
-
-    cache.* = .{
-        .size = size + @sizeOf(BlockCacheEntry.Header),
-        .count = count,
-        .dispose = dispose,
-        .next = 0,
-        .buf = undefined,
-    };
-
-    const buf = try allocator.alloc(u8, count * cache.size);
-    @memset(buf, 0);
-
-    cache.buf = buf.ptr;
-
-    return cache;
-}
-
-pub fn header(cache: *Cache, i: usize) *BlockCacheEntry.Header {
-    return @ptrCast(@alignCast(cache.buf + i * cache.size));
-}
-
-pub fn entry(cache: *Cache, i: usize) ?*anyopaque {
-    return @ptrFromInt(
-        @intFromPtr(cache.header(i)) + @sizeOf(BlockCacheEntry.Header),
-    );
-}
-
-pub const Dispose = *const fn (data: ?*anyopaque) callconv(.C) void;
-
-pub const BlockCacheEntry = extern struct {
-    block: *SquashFs.Block,
-    data_size: usize,
-
-    pub const Header = extern struct {
-        valid: bool,
-        idx: u64,
-    };
-
-    pub fn init(
         allocator: std.mem.Allocator,
+
+        entries: []Entry,
+
         count: usize,
-    ) !*Cache {
-        return try Cache.init(
-            allocator,
-            @sizeOf(BlockCacheEntry),
-            count,
-            @ptrCast(&noop),
-        );
-    }
+        next: usize,
 
-    pub fn header(e: *BlockCacheEntry) *Header {
-        var hdr: [*]Header = @ptrCast(@alignCast(e));
-        hdr -= 1;
+        pub const Entry = struct {
+            header: Header,
+            entry: T,
 
-        return @ptrCast(hdr);
-    }
+            pub const Header = packed struct(u64) {
+                idx: u63,
+                valid: bool,
+            };
+        };
 
-    pub fn isValid(e: *BlockCacheEntry) bool {
-        return e.header().valid;
-    }
+        pub fn init(
+            allocator: std.mem.Allocator,
+            count: usize,
+        ) !Self {
+            const cache = .{
+                .allocator = allocator,
+                .count = count,
+                // .dispose = dispose,
+                .next = 0,
+                .entries = try allocator.alloc(
+                    Entry,
+                    count,
+                ),
+            };
 
-    pub fn markValid(e: *BlockCacheEntry) void {
-        var hdr = e.header();
+            @memset(cache.entries, .{
+                .entry = undefined,
+                .header = .{
+                    .idx = 0,
+                    .valid = false,
+                },
+            });
 
-        if (hdr.valid) unreachable;
-
-        hdr.valid = true;
-    }
-};
-
-// sqfs_cache_get
-pub fn getCache(
-    allocator: std.mem.Allocator,
-    ch: *Cache,
-    idx: u64,
-) *BlockCacheEntry {
-    _ = allocator;
-
-    var i: usize = 0;
-
-    while (i < ch.count) : (i += 1) {
-        const hdr = ch.header(i);
-
-        if (hdr.idx == idx) {
-            assert(hdr.valid);
-
-            return @ptrCast(@alignCast(ch.entry(i)));
+            return cache;
         }
-    }
 
-    i = ch.next;
-    ch.next += 1;
+        pub fn deinit(cache: *Self) void {
+            cache.allocator.free(cache.entries);
+        }
 
-    ch.next %= ch.count;
+        // TODO
+        //        pub fn put(cache: *Self, idx, usize, item: T) void {
+        //
+        //            for (ch.entries) |*ent| {
+        //                std.debug.print(
+        //                    "idx {d}\n",
+        //                    .{ent.header.idx},
+        //                );
+        //                if (ent.header.idx == idx) {
+        //                    assert(ent.header.valid);
+        //
+        //                    return ent;
+        //                }
+        //            }
+        //        }
 
-    var hdr = ch.header(i);
-    if (hdr.valid) {
-        ch.dispose(@ptrFromInt(@intFromPtr(hdr) + @sizeOf(BlockCacheEntry.Header)));
-        hdr.valid = false;
-    }
+        pub fn get(
+            ch: *Self,
+            idx: usize,
+        ) *Entry {
+            // Search cache for index, return if present
+            for (ch.entries) |*ent| {
+                if (ent.header.idx == idx) {
+                    assert(ent.header.valid);
 
-    hdr.idx = idx;
-    return @ptrFromInt(@intFromPtr(hdr) + @sizeOf(BlockCacheEntry.Header));
+                    return ent;
+                }
+            }
+
+            // Move to the next entry, invalidate it so it's ready for new
+            // data
+            const entry = &ch.entries[ch.next];
+            if (entry.header.valid) {
+                //   ch.dispose(@ptrFromInt(@intFromPtr(hdr) + @sizeOf(BlockCacheEntry.Header)));
+                entry.header.valid = false;
+            }
+
+            entry.header.idx = @intCast(idx);
+
+            ch.next += 1;
+            ch.next %= ch.count;
+
+            return entry;
+        }
+    };
 }
 
 pub const BlockIdx = struct {
-    pub fn init(allocator: std.mem.Allocator) !*Cache {
-        return try Cache.init(
-            allocator,
-            @sizeOf(**BlockIdx.Entry),
-            SquashFs.meta_slots,
-            &dispose,
-        );
-    }
+    //const Self = Cache(**BlockIdx.Entry);
+    //const Self = Cache(*BlockIdx.Entry);
 
     pub const Entry = extern struct {
         data_block: u64,
         md_block: u32,
     };
 
-    export fn dispose(data: ?*anyopaque) callconv(.C) void {
-        const e: *BlockCacheEntry = @ptrCast(@alignCast(data.?));
-        //c.sqfs_block_dispose(@ptrCast(entry.block));
-        _ = e;
-    }
-
     pub fn indexable(sqfs: *SquashFs, inode: *Inode) bool {
-        const blocks = SquashFs.File.BlockList.count(sqfs, inode);
+        const blocks = SquashFs.File.BlockList.count(
+            sqfs,
+            inode,
+        );
+
         const md_size = blocks * @sizeOf(u32);
         return md_size >= SquashFs.metadata_size;
     }
 
-    fn blockidx_add(sqfs: *SquashFs, inode: *Inode, out: [*c][*c]BlockIdx.Entry, cachep: **BlockIdx.Entry) !void {
+    // TODO: refactor
+    fn blockidx_add(
+        sqfs: *SquashFs,
+        inode: *Inode,
+        out: [*c][*c]BlockIdx.Entry,
+        cachep: **BlockIdx.Entry,
+    ) !void {
         var blocks: usize = undefined;
         var md_size: usize = undefined;
         var count: usize = undefined;
@@ -194,7 +168,7 @@ pub const BlockIdx = struct {
         cachep.* = blockidx;
     }
 
-    // TODO
+    // TODO: refactor
     pub fn blockList(
         sqfs: *SquashFs,
         inode: *SquashFs.Inode,
@@ -208,7 +182,7 @@ pub const BlockIdx = struct {
         var bp: **BlockIdx.Entry = undefined;
         var blockidx: [*c]BlockIdx.Entry = undefined;
 
-        var idx: u64 = 0;
+        var idx: usize = 0;
 
         bl.* = try SquashFs.File.BlockList.init(sqfs, inode);
 
@@ -229,9 +203,10 @@ pub const BlockIdx = struct {
 
         idx = inode.internal.base.inode_number + 1;
 
-        bp = @ptrCast(getCache(sqfs.allocator, @ptrCast(@alignCast(sqfs.blockidx)), idx));
+        //bp = @ptrCast(getCache(sqfs.allocator, @ptrCast(@alignCast(sqfs.blockidx)), idx));
+        bp = @ptrCast(sqfs.blockidx.get(idx));
         //if (c.sqfs_cache_entry_valid(&sqfs.internal.blockidx, @ptrCast(bp)) != 0) {
-        if (@as(*BlockCacheEntry, @ptrCast(bp)).isValid()) {
+        if (sqfs.blockidx.entries[idx].header.valid) {
             blockidx = bp.*;
         } else {
             try blockidx_add(
@@ -240,7 +215,8 @@ pub const BlockIdx = struct {
                 @ptrCast(&blockidx),
                 @ptrCast(bp),
             );
-            @as(*BlockCacheEntry, @ptrCast(bp)).markValid();
+            //@as(*BlockCacheEntry, @ptrCast(bp)).markValid();
+            sqfs.blockidx.entries[idx].header.valid = true;
         }
 
         skipped = (metablock * SquashFs.metadata_size / 4) - (bl.cur.offset / 4);
