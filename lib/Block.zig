@@ -1,6 +1,7 @@
 pub const Block = @This();
 
 data: []u8,
+data_size: usize = 0,
 refcount: u64,
 
 /// Describes a SquashFS fragment block

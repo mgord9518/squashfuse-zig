@@ -39,7 +39,7 @@ test "open SquashFS image (zlib)" {
 }
 
 // TODO: loop and test all compression algos
-test "walk tree" {
+test "SquashFs.Inode.walk" {
     const allocator = std.testing.allocator;
 
     inline for (compression_algos) |algo| {
@@ -63,7 +63,7 @@ test "walk tree" {
     }
 }
 
-test "file permissions" {
+test "SquashFs.Inode.Stat" {
     const allocator = std.testing.allocator;
 
     inline for (compression_algos) |algo| {
@@ -87,6 +87,52 @@ test "file permissions" {
             const goal_mode = try std.fmt.parseInt(u9, entry.path[5..], 8);
 
             try expect(trunc_mode == goal_mode);
+        }
+    }
+}
+
+test "devices" {
+    const allocator = std.testing.allocator;
+
+    inline for (compression_algos) |algo| {
+        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
+
+        var sqfs = try SquashFs.init(allocator, file_path, .{});
+        defer sqfs.deinit();
+
+        var root_inode = sqfs.getRootInode();
+
+        var iterator = try root_inode.iterate();
+        //defer walker.deinit();
+
+        var idx: usize = 0;
+        while (try iterator.next()) |entry| : (idx += 1) {
+            var inode = entry.inode();
+            _ = &inode;
+
+            if (std.mem.eql(
+                u8,
+                entry.name,
+                "block_device",
+            )) {
+                const dev = inode.internal.xtra.dev;
+
+                try expect(dev.major() == 69);
+                try expect(dev.minor() == 2);
+            }
+
+            if (std.mem.eql(
+                u8,
+                entry.name,
+                "character_device",
+            )) {
+                const dev = inode.internal.xtra.dev;
+
+                try expect(dev.major() == 0);
+                try expect(dev.minor() == 1);
+            }
+
+            //            try expect(trunc_mode == goal_mode);
         }
     }
 }
@@ -194,7 +240,9 @@ const file_tree = &[_][]const u8{
     "2/text",
     // Very long filename
     "A" ** 256,
+    "block_device",
     "broken_symlink",
+    "character_device",
     // Permissions
     "perm_400",
     "perm_644",

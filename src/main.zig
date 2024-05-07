@@ -20,6 +20,8 @@ const version = std.SemanticVersion{
     .patch = 1,
 };
 
+var env_map: std.process.EnvMap = undefined;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -45,7 +47,7 @@ pub fn main() !void {
         \\<str>...
     );
 
-    const env_map = try std.process.getEnvMap(allocator);
+    env_map = try std.process.getEnvMap(allocator);
 
     if (env_map.get("NO_COLOR")) |_| {
         reset = "";
@@ -328,55 +330,35 @@ pub fn main() !void {
 
         while (try walker.next()) |entry| {
             var inode = entry.inode();
+
+            const color = try getEntryColor(entry, &name_buf);
+
             const st = try inode.statC();
 
-            st_buf[0] = switch (entry.kind) {
-                .file => '-',
-                .directory => 'd',
-                .sym_link => 'l',
-                .named_pipe => 'p',
-                .character_device => 'c',
-                .block_device => 'c',
-                .unix_domain_socket => 's',
-            };
-
-            st_buf[1] = if (st.mode & S.IRUSR != 0) 'r' else '-';
-            st_buf[2] = if (st.mode & S.IWUSR != 0) 'w' else '-';
-            st_buf[3] = if (st.mode & S.IXUSR != 0) 'x' else '-';
-
-            st_buf[4] = if (st.mode & S.IRGRP != 0) 'r' else '-';
-            st_buf[5] = if (st.mode & S.IWGRP != 0) 'w' else '-';
-            st_buf[6] = if (st.mode & S.IXGRP != 0) 'x' else '-';
-
-            st_buf[7] = if (st.mode & S.IROTH != 0) 'r' else '-';
-            st_buf[8] = if (st.mode & S.IWOTH != 0) 'w' else '-';
-            st_buf[9] = if (st.mode & S.IXOTH != 0) 'x' else '-';
-
-            var color = switch (entry.kind) {
-                .file => try getLsColor(&name_buf, "fi"),
-                .directory => try getLsColor(&name_buf, "di"),
-                .sym_link => try getLsColor(&name_buf, "ln"),
-                .named_pipe => try getLsColor(&name_buf, "pi"),
-                .unix_domain_socket => try getLsColor(&name_buf, "so"),
-                .block_device => try getLsColor(&name_buf, "bd"),
-                .character_device => try getLsColor(&name_buf, "cd"),
-            };
-
-            const mode = st.mode & 0o777;
-            const glob = try std.fmt.bufPrint(
-                &name_buf,
-                "*{s}",
-                .{getExtension(entry.path) orelse ""},
-            );
-            color = try getLsColor(&name_buf, glob);
-
-            if (st.mode & S.IXUSR | st.mode & S.IXGRP | st.mode & S.IXOTH != 0) {
-                color = try getLsColor(&name_buf, "ex");
-            }
-
             if (res.args.list == 2) {
-                _ = mode;
-                try stdout.print("{s}{s} {0s}{d} {d} {d} {s}{s}\n", .{
+                st_buf[0] = switch (entry.kind) {
+                    .file => '-',
+                    .directory => 'd',
+                    .sym_link => 'l',
+                    .named_pipe => 'p',
+                    .character_device => 'c',
+                    .block_device => 'c',
+                    .unix_domain_socket => 's',
+                };
+
+                st_buf[1] = if (st.mode & S.IRUSR != 0) 'r' else '-';
+                st_buf[2] = if (st.mode & S.IWUSR != 0) 'w' else '-';
+                st_buf[3] = if (st.mode & S.IXUSR != 0) 'x' else '-';
+
+                st_buf[4] = if (st.mode & S.IRGRP != 0) 'r' else '-';
+                st_buf[5] = if (st.mode & S.IWGRP != 0) 'w' else '-';
+                st_buf[6] = if (st.mode & S.IXGRP != 0) 'x' else '-';
+
+                st_buf[7] = if (st.mode & S.IROTH != 0) 'r' else '-';
+                st_buf[8] = if (st.mode & S.IWOTH != 0) 'w' else '-';
+                st_buf[9] = if (st.mode & S.IXOTH != 0) 'x' else '-';
+
+                try stdout.print("{s}{s} {0s}{d} {d} {d} {s}{s}{0s}\n", .{
                     reset,
                     st_buf[0..10],
                     inode.internal.nlink,
@@ -386,7 +368,7 @@ pub fn main() !void {
                     entry.path,
                 });
             } else {
-                try stdout.print("{s}{s}\n", .{ color, entry.path });
+                try stdout.print("{s}{s}{s}\n", .{ color, entry.path, reset });
             }
         }
 
@@ -523,6 +505,48 @@ fn extractArchive(
     }
 }
 
+fn getEntryColor(entry: SquashFs.Inode.Walker.Entry, name_buf: []u8) ![]const u8 {
+    _ = env_map.get("LS_COLORS") orelse return reset;
+
+    var inode = entry.inode();
+
+    const st = try inode.statC();
+
+    // Initially set the color based on the file type
+    var color = getLsColor(name_buf, switch (inode.kind) {
+        .file => "fi",
+        .directory => "di",
+        .sym_link => "ln",
+        .named_pipe => "pi",
+        .unix_domain_socket => "so",
+        .block_device => "bd",
+        .character_device => "cd",
+    }) orelse reset;
+
+    // Then override with the file extension
+    // TODO: is this correct behavior?
+    const glob = try std.fmt.bufPrint(
+        name_buf,
+        "*{s}",
+        .{getExtension(entry.path) orelse ""},
+    );
+    color = getLsColor(name_buf, glob) orelse color;
+
+    if ((st.mode & S.IXUSR) | (st.mode & S.IXGRP) | (st.mode & S.IXOTH) != 0) {
+        color = getLsColor(name_buf, "ex") orelse color;
+    }
+
+    if (st.mode & S.ISUID != 0) {
+        color = getLsColor(name_buf, "su") orelse color;
+    }
+
+    if (st.mode & S.ISGID != 0) {
+        color = getLsColor(name_buf, "sg") orelse color;
+    }
+
+    return color;
+}
+
 fn getExtension(file_name: []const u8) ?[]const u8 {
     var it = std.mem.splitBackwardsSequence(u8, file_name, ".");
 
@@ -533,17 +557,11 @@ fn getExtension(file_name: []const u8) ?[]const u8 {
     return file_name[file_name.len - chars.len - 1 ..];
 }
 
-fn getLsColor(buf: []u8, glob: []const u8) ![]const u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    var env_map = try std.process.getEnvMap(allocator);
-    defer env_map.deinit();
-
+fn getLsColor(buf: []u8, glob: []const u8) ?[]const u8 {
     // TODO: better NO_COLOR check
-    if (reset.len == 0) return "";
+    if (reset.len == 0) return null;
 
-    const colors = env_map.get("LS_COLORS") orelse return "";
+    const colors = env_map.get("LS_COLORS") orelse return null;
 
     var it = std.mem.splitSequence(u8, colors, ":");
     while (it.next()) |color| {
@@ -551,15 +569,15 @@ fn getLsColor(buf: []u8, glob: []const u8) ![]const u8 {
         const file_type = std.mem.sliceTo(color, '=');
 
         if (std.mem.eql(u8, file_type, glob)) {
-            return try std.fmt.bufPrint(
+            return std.fmt.bufPrint(
                 buf,
                 "\x1b[{s}m",
                 .{color[file_type.len + 1 ..]},
-            );
+            ) catch unreachable;
         }
     }
 
-    return "";
+    return null;
 }
 
 var reset: []const u8 = "\x1b[0;0m";

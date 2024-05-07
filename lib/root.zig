@@ -332,42 +332,6 @@ pub const SquashFs = struct {
         };
     }
 
-    fn TypeFromFileKind(comptime kind: SquashFs.File.InternalKind) type {
-        // zig fmt: off
-        return switch (kind) {
-            .directory => SquashFs.SuperBlock.DirInode,
-            .file      => SquashFs.SuperBlock.FileInode,
-            .sym_link, .l_sym_link           => SquashFs.SuperBlock.SymLinkInode,
-            .block_device, .character_device => SquashFs.SuperBlock.DevInode,
-            .named_pipe, .unix_domain_socket => SquashFs.SuperBlock.IpcInode,
-
-            .l_directory => SquashFs.SuperBlock.LDirInode,
-            .l_file      => SquashFs.SuperBlock.LFileInode,
-            .l_block_device, .l_character_device => SquashFs.SuperBlock.LDevInode,
-            .l_named_pipe, .l_unix_domain_socket => SquashFs.SuperBlock.LIpcInode,
-        };
-        // zig fmt: on
-    }
-
-    fn inodeType(
-        comptime kind: SquashFs.File.InternalKind,
-        allocator: std.mem.Allocator,
-        sqfs: *SquashFs,
-        inode: *Inode.Internal,
-    ) !TypeFromFileKind(kind) {
-        _ = sqfs;
-        const T = TypeFromFileKind(kind);
-
-        var x: T = undefined;
-
-        try inode.next.load(
-            allocator,
-            &x,
-        );
-
-        return littleToNative(x);
-    }
-
     fn getInodeFromId(
         allocator: std.mem.Allocator,
         sqfs: *SquashFs,
@@ -413,52 +377,62 @@ pub const SquashFs = struct {
 
         switch (kind) {
             .file => {
-                const x = try inodeType(
-                    .file,
+                var x: SuperBlock.FileInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .reg = x.toLong() };
             },
             .l_file => {
-                const x = try inodeType(
-                    .l_file,
+                var x: SuperBlock.LFileInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .reg = x };
             },
             .directory => {
-                const x = try inodeType(
-                    .directory,
+                var x: SuperBlock.DirInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .dir = x.toLong() };
             },
             .l_directory => {
-                const x = try inodeType(
-                    .l_directory,
+                var x: SuperBlock.LDirInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .dir = x };
             },
             .sym_link, .l_sym_link => {
-                const x = try inodeType(
-                    .sym_link,
+                var x: SuperBlock.SymLinkInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .symlink = x };
 
@@ -485,32 +459,50 @@ pub const SquashFs = struct {
                 }
             },
             .block_device, .character_device => {
-                const x = try inodeType(
-                    .block_device,
+                var x: SuperBlock.DevInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .dev = x.toLong() };
             },
             .l_block_device, .l_character_device => {
-                const x = try inodeType(
-                    .l_block_device,
+                var x: SuperBlock.LDevInode = undefined;
+
+                try inode.next.load(
                     allocator,
-                    sqfs,
-                    &inode,
+                    &x,
                 );
+
+                x = littleToNative(x);
 
                 inode.xtra = .{ .dev = x };
             },
             .unix_domain_socket, .named_pipe => {
-                const x = try inodeType(.named_pipe, allocator, sqfs, &inode);
+                var x: SuperBlock.IpcInode = undefined;
+
+                try inode.next.load(
+                    allocator,
+                    &x,
+                );
+
+                x = littleToNative(x);
 
                 inode.nlink = @intCast(x.nlink);
             },
             .l_unix_domain_socket, .l_named_pipe => {
-                const x = try inodeType(.l_named_pipe, allocator, sqfs, &inode);
+                var x: SuperBlock.LIpcInode = undefined;
+
+                try inode.next.load(
+                    allocator,
+                    &x,
+                );
+
+                x = littleToNative(x);
 
                 inode.nlink = @intCast(x.nlink);
                 inode.xattr = @intCast(x.xattr);
@@ -568,10 +560,7 @@ pub const SquashFs = struct {
         allocator: std.mem.Allocator,
         pos: *u64,
     ) !Block {
-        //var entry = Cache.getCache(
-        var entry = sqfs.md_cache.get(@truncate(pos.*));
-
-        var data_size: usize = undefined;
+        var entry = sqfs.md_cache.get(pos.*);
 
         // Block not yet in cache, add it
         if (!entry.header.valid) {
@@ -596,19 +585,12 @@ pub const SquashFs = struct {
                 SquashFs.metadata_size,
             );
 
-            //entry.entry.data_size = header.size + 2;
-            data_size = header.size + 2;
+            entry.entry.data_size = header.size + 2;
 
             entry.header.valid = true;
         }
 
-        //std.debug.print("data {d}\n", .{entry.data_size});
-        //std.debug.print("blok {d}\n", .{entry.block.data.len});
-
-        pos.* += @intCast(data_size);
-        //pos.* += @intCast(entry.entry.data_size);
-        //pos.* += @intCast(entry.block.data.len);
-        //pos.* += @intCast(entry.block.data.len + 2);
+        pos.* += entry.entry.data_size;
 
         return entry.entry;
     }
@@ -930,7 +912,7 @@ pub const SquashFs = struct {
                     st.blocks = @divTrunc(st.size, 512);
                 },
                 .block_device, .character_device => {
-                    st.rdev = inode.internal.xtra.dev.rdev;
+                    st.rdev = @as(u32, @bitCast(inode.internal.xtra.dev.dev));
                     //                    st.rdev = makeDev(
                     //                        @intCast(inode.internal.xtra.dev.major()),
                     //                        @intCast(inode.internal.xtra.dev.minor()),
@@ -1172,6 +1154,15 @@ pub const SquashFs = struct {
                         dest,
                         .{ .is_directory = false },
                     );
+                },
+
+                .block_device, .character_device => {
+                    const dev = self.internal.xtra.dev;
+
+                    var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                    const path = try std.fmt.bufPrintZ(&path_buf, "{s}", .{dest});
+
+                    _ = std.os.linux.mknod(path, dev.major(), dev.minor());
                 },
 
                 // TODO: implement for other types
@@ -1525,16 +1516,11 @@ fn blockRead(
             break :blk 0;
         };
 
-        //std.debug.print("{d} {d} {d} {}\n", .{ size, out_size, written, compressed });
-
         allocator.free(block.data);
 
         const ret = allocator.resize(decomp, written);
         block.data = decomp[0..written];
         _ = ret;
-
-        //std.debug.print("{d} {}\n", .{ block.data.len, ret });
-        //std.debug.print("{d} {}\n", .{ decomp.len, ret });
     }
 
     return block;

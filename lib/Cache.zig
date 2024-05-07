@@ -32,7 +32,6 @@ pub fn Cache(T: type) type {
             const cache = .{
                 .allocator = allocator,
                 .count = count,
-                // .dispose = dispose,
                 .next = 0,
                 .entries = try allocator.alloc(
                     Entry,
@@ -73,7 +72,7 @@ pub fn Cache(T: type) type {
 
         pub fn get(
             ch: *Self,
-            idx: usize,
+            idx: u64,
         ) *Entry {
             // Search cache for index, return if present
             for (ch.entries) |*ent| {

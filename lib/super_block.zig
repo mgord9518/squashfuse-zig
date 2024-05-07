@@ -102,28 +102,29 @@ pub const SuperBlock = extern struct {
     pub const DevInode = extern struct {
         base: InodeBase,
         nlink: u32,
-        rdev: u32,
+        dev: Device,
+
+        const Device = packed struct(u32) {
+            minor_dev: u8,
+            major_dev: u12,
+            minor_dev_extended: u12,
+        };
 
         pub fn toLong(inode: DevInode) LDevInode {
             return .{
                 .base = inode.base,
                 .nlink = 1,
                 .xattr = SquashFs.invalid_xattr,
-                .rdev = inode.rdev,
+                .dev = inode.dev,
             };
         }
 
-        fn major(inode: DevInode) u12 {
-            return @intCast((inode.rdev >> 8) & 0xfff);
+        pub fn major(inode: DevInode) u12 {
+            return inode.dev.major_dev;
         }
 
-        fn minor(inode: DevInode) u12 {
-            _ = inode;
-
-            //                inode.xtra = .{ .dev = .{
-            //                    .major = @intCast((x.rdev >> 8) & 0xfff),
-            //                    .minor = @intCast((x.rdev & 0xff) | (x.rdev >> 12) & 0xfff00),
-            //                } };
+        pub fn minor(inode: DevInode) u16 {
+            return (@as(u16, inode.dev.minor_dev_extended) << 8) + inode.dev.minor_dev;
         }
     };
 
@@ -157,15 +158,15 @@ pub const SuperBlock = extern struct {
     pub const LDevInode = extern struct {
         base: InodeBase,
         nlink: u32,
-        rdev: u32,
+        dev: DevInode.Device,
         xattr: u32,
 
-        fn major(inode: LDevInode) u12 {
-            return @intCast((inode.rdev >> 8) & 0xfff);
+        pub fn major(inode: LDevInode) u12 {
+            return inode.dev.major_dev;
         }
 
-        fn minor(inode: LDevInode) u20 {
-            return @intCast((inode.rdev & 0xff) | (inode.rdev >> 12) & 0xfff00);
+        pub fn minor(inode: LDevInode) u16 {
+            return (@as(u16, inode.dev.minor_dev_extended) << 8) + inode.dev.minor_dev;
         }
     };
 

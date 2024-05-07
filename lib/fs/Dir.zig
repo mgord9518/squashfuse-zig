@@ -24,7 +24,7 @@ pub const Entry = struct {
     pub const Kind = SquashFs.File.Kind;
 };
 
-const InternalEntry = packed struct {
+const InternalEntry = packed struct(u64) {
     offset: u16,
     inode_number: u16,
 
@@ -123,17 +123,15 @@ pub const Iterator = struct {
                 return null;
             }
 
-            const header_slice: []u8 = @as([*]u8, @ptrCast(&dir.header))[0..@sizeOf(@TypeOf(dir.header))];
-
-            dir.offset += header_slice.len;
-            try dir.cur.read(iterator.allocator, header_slice);
+            dir.offset += @sizeOf(Header);
+            try dir.cur.load(iterator.allocator, &dir.header);
 
             dir.header = squashfuse.littleToNative(dir.header);
             dir.header.count += 1;
         }
 
-        const e_slice: []u8 = @as([*]u8, @ptrCast(&ll_entry))[0..@sizeOf(@TypeOf(ll_entry))];
-        try dirMdRead(iterator.allocator, iterator.sqfs, dir, e_slice);
+        dir.offset += @sizeOf(InternalEntry);
+        try dir.cur.load(iterator.allocator, &ll_entry);
 
         ll_entry = squashfuse.littleToNative(ll_entry);
 
@@ -150,20 +148,9 @@ pub const Iterator = struct {
 
         entry.inode_number = dir.header.inode_number + ll_entry.inode_number;
 
-        try dirMdRead(iterator.allocator, iterator.sqfs, dir, entry.name);
+        dir.offset += entry.name.len;
+        try dir.cur.load(iterator.allocator, entry.name);
 
         return entry;
     }
 };
-
-fn dirMdRead(
-    allocator: std.mem.Allocator,
-    sqfs: *SquashFs,
-    dir: *SquashFs.Dir,
-    buf: []u8,
-) !void {
-    _ = sqfs;
-    dir.offset += @intCast(buf.len);
-
-    try dir.cur.read(allocator, buf);
-}
