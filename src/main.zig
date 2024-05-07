@@ -7,6 +7,7 @@ const fuse = @import("fuse");
 const clap = @import("clap");
 const squashfuse = @import("squashfuse");
 const SquashFs = squashfuse.SquashFs;
+const ls_colors = @import("ls_colors.zig");
 
 const S = std.os.linux.S;
 
@@ -309,13 +310,26 @@ pub fn main() !void {
     var root_inode = FuseOperations.squash.image.getRootInode();
 
     if (res.args.extract != 0) {
-        try extractArchive(
+        extractArchive(
             allocator,
             &sqfs,
             src,
             dest,
             .{ .verbose = res.args.verbose != 0 },
-        );
+        ) catch |err| {
+            const error_string = switch (err) {
+                error.PathAlreadyExists => "path already exists",
+                else => return err,
+            };
+
+            try stderr.print("{s}::{s} failed to extract image: {s}\n", .{
+                red,
+                reset,
+                error_string,
+            });
+
+            posix.exit(1);
+        };
 
         return;
     }
@@ -326,12 +340,13 @@ pub fn main() !void {
     if (res.args.list != 0) {
         // Long printing
         var st_buf: [10]u8 = undefined;
-        var name_buf: [4096]u8 = undefined;
+        var col_buf: [4096]u8 = undefined;
+        const colors = env_map.get("LS_COLORS") orelse "";
 
         while (try walker.next()) |entry| {
             var inode = entry.inode();
 
-            const color = try getEntryColor(entry, &name_buf);
+            const color = try ls_colors.getEntryColor(entry, colors, &col_buf);
 
             const st = try inode.statC();
 
@@ -503,81 +518,6 @@ fn extractArchive(
     if (!file_found) {
         std.debug.print("file ({s}) not found!\n", .{real_src});
     }
-}
-
-fn getEntryColor(entry: SquashFs.Inode.Walker.Entry, name_buf: []u8) ![]const u8 {
-    _ = env_map.get("LS_COLORS") orelse return reset;
-
-    var inode = entry.inode();
-
-    const st = try inode.statC();
-
-    // Initially set the color based on the file type
-    var color = getLsColor(name_buf, switch (inode.kind) {
-        .file => "fi",
-        .directory => "di",
-        .sym_link => "ln",
-        .named_pipe => "pi",
-        .unix_domain_socket => "so",
-        .block_device => "bd",
-        .character_device => "cd",
-    }) orelse reset;
-
-    // Then override with the file extension
-    // TODO: is this correct behavior?
-    const glob = try std.fmt.bufPrint(
-        name_buf,
-        "*{s}",
-        .{getExtension(entry.path) orelse ""},
-    );
-    color = getLsColor(name_buf, glob) orelse color;
-
-    if ((st.mode & S.IXUSR) | (st.mode & S.IXGRP) | (st.mode & S.IXOTH) != 0) {
-        color = getLsColor(name_buf, "ex") orelse color;
-    }
-
-    if (st.mode & S.ISUID != 0) {
-        color = getLsColor(name_buf, "su") orelse color;
-    }
-
-    if (st.mode & S.ISGID != 0) {
-        color = getLsColor(name_buf, "sg") orelse color;
-    }
-
-    return color;
-}
-
-fn getExtension(file_name: []const u8) ?[]const u8 {
-    var it = std.mem.splitBackwardsSequence(u8, file_name, ".");
-
-    const chars = it.first();
-
-    if (chars.len == file_name.len) return file_name;
-
-    return file_name[file_name.len - chars.len - 1 ..];
-}
-
-fn getLsColor(buf: []u8, glob: []const u8) ?[]const u8 {
-    // TODO: better NO_COLOR check
-    if (reset.len == 0) return null;
-
-    const colors = env_map.get("LS_COLORS") orelse return null;
-
-    var it = std.mem.splitSequence(u8, colors, ":");
-    while (it.next()) |color| {
-        if (color.len < 3) continue;
-        const file_type = std.mem.sliceTo(color, '=');
-
-        if (std.mem.eql(u8, file_type, glob)) {
-            return std.fmt.bufPrint(
-                buf,
-                "\x1b[{s}m",
-                .{color[file_type.len + 1 ..]},
-            ) catch unreachable;
-        }
-    }
-
-    return null;
 }
 
 var reset: []const u8 = "\x1b[0;0m";

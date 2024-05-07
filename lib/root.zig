@@ -315,6 +315,7 @@ pub const SquashFs = struct {
     // missing from the bindings)
     pub inline fn getInode(sqfs: *SquashFs, id: Inode.TableEntry) !Inode {
         const allocator = sqfs.arena2.allocator();
+        //const allocator = sqfs.allocator;
 
         // TODO implement block dispose, fix memory leak
         const sqfs_inode = try getInodeFromId(
@@ -441,7 +442,7 @@ pub const SquashFs = struct {
 
                     // Skip symlink target
                     try sqfs.mdSkip(
-                        sqfs.arena.allocator(),
+                        allocator,
                         &cur,
                         x.size,
                     );
@@ -522,7 +523,8 @@ pub const SquashFs = struct {
         if (idx == SquashFs.invalid_frag) return error.Error;
 
         try sqfs.frag_table.get(
-            sqfs.arena2.allocator(),
+            //sqfs.arena.allocator(),
+            sqfs.allocator,
             sqfs,
             idx,
             frag,
@@ -535,7 +537,8 @@ pub const SquashFs = struct {
         pos: u64,
         header: Block.DataEntry,
     ) !Block {
-        const allocator = sqfs.arena2.allocator();
+        //const allocator = sqfs.arena2.allocator();
+        const allocator = sqfs.allocator;
 
         var entry = cache.get(@truncate(pos));
 
@@ -716,11 +719,11 @@ pub const SquashFs = struct {
                 return 0;
             }
 
-            var bl: SquashFs.File.BlockList = undefined;
-            BlockIdx.blockList(
+            //var bl: SquashFs.File.BlockList = undefined;
+            var bl = BlockIdx.blockList(
                 sqfs,
                 inode,
-                &bl,
+                //&bl,
                 offset,
             ) catch return error.SystemResources;
 
@@ -926,8 +929,8 @@ pub const SquashFs = struct {
 
             st.blksize = @intCast(inode.parent.super_block.block_size);
 
-            st.uid = try getId(inode.parent.arena.allocator(), inode.parent, inode.internal.base.uid);
-            st.gid = try getId(inode.parent.arena.allocator(), inode.parent, inode.internal.base.guid);
+            st.uid = try getId(inode.parent.allocator, inode.parent, inode.internal.base.uid);
+            st.gid = try getId(inode.parent.allocator, inode.parent, inode.internal.base.guid);
 
             return st;
         }
@@ -1487,17 +1490,11 @@ fn blockRead(
     size: u32,
     out_size: usize,
 ) !SquashFs.Block {
-    //var block = try allocator.create(SquashFs.Block);
     var block = SquashFs.Block{
         .refcount = 1,
         .data = try allocator.alloc(u8, size),
+        .allocator = allocator,
     };
-
-    //    block.refcount = 1;
-
-    //   block.data = try allocator.alloc(u8, size);
-
-    //    var written = out_size;
 
     try sqfs.load(
         block.data,
@@ -1518,50 +1515,12 @@ fn blockRead(
 
         allocator.free(block.data);
 
-        const ret = allocator.resize(decomp, written);
         block.data = decomp[0..written];
+        const ret = allocator.resize(block.data, written);
         _ = ret;
     }
 
     return block;
-}
-
-pub fn medBlockRead(
-    allocator: std.mem.Allocator,
-    sqfs: *SquashFs,
-    pos: u64,
-    block: **SquashFs.Block,
-) !usize {
-    var hdr: [2]u8 = undefined;
-
-    try sqfs.load(
-        &hdr,
-        pos + sqfs.offset,
-    );
-
-    const hdr_le = std.mem.littleToNative(
-        u16,
-        @bitCast(hdr),
-    );
-
-    var size = hdr_le & ~@as(u16, SquashFs.compressed_bit);
-
-    if (size == 0) {
-        size = SquashFs.compressed_bit;
-    }
-
-    const compressed = hdr_le & SquashFs.compressed_bit == 0;
-
-    block.* = try blockRead(
-        allocator,
-        sqfs,
-        pos + hdr.len,
-        compressed,
-        size,
-        SquashFs.metadata_size,
-    );
-
-    return size + hdr.len;
 }
 
 // Define C symbols for compression algos

@@ -51,6 +51,14 @@ pub fn Cache(T: type) type {
         }
 
         pub fn deinit(cache: *Self) void {
+            // TODO: why does this segfault?
+            //            for (cache.entries) |*entry| {
+            //                if (!entry.header.valid) continue;
+            //
+            //                if (@typeInfo(T) == .Struct and @hasDecl(T, "deinit")) {
+            //                    entry.entry.deinit();
+            //                }
+            //            }
             cache.allocator.free(cache.entries);
         }
 
@@ -83,11 +91,14 @@ pub fn Cache(T: type) type {
                 }
             }
 
-            // Move to the next entry, invalidate it so it's ready for new
-            // data
+            // Move to the next entry, free and invalidate what was there
+            // so we can put something else there
             const entry = &ch.entries[ch.next];
             if (entry.header.valid) {
-                //   ch.dispose(@ptrFromInt(@intFromPtr(hdr) + @sizeOf(BlockCacheEntry.Header)));
+                if (@typeInfo(T) == .Struct and @hasDecl(T, "deinit")) {
+                    entry.entry.deinit();
+                }
+
                 entry.header.valid = false;
             }
 
@@ -121,113 +132,97 @@ pub const BlockIdx = struct {
     }
 
     // TODO: refactor
-    fn blockidx_add(
+    fn addBlockIdx(
         sqfs: *SquashFs,
         inode: *Inode,
-        out: [*c][*c]BlockIdx.Entry,
         cachep: **BlockIdx.Entry,
-    ) !void {
-        var blocks: usize = undefined;
-        var md_size: usize = undefined;
-        var count: usize = undefined;
-
-        var blockidx: [*c]BlockIdx.Entry = undefined;
-        var bl: SquashFs.File.BlockList = undefined;
-
-        var i: usize = 0;
+    ) ![]BlockIdx.Entry {
         var first = true;
 
-        out.* = null;
+        const blocks = SquashFs.File.BlockList.count(sqfs, inode);
+        const md_size = blocks * 4;
+        const count = (inode.internal.next.offset + md_size - 1) / SquashFs.metadata_size;
 
-        blocks = SquashFs.File.BlockList.count(sqfs, inode);
-        md_size = blocks * 4;
-        count = (inode.internal.next.offset + md_size - 1) / SquashFs.metadata_size;
-
-        blockidx = @ptrCast((sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable).ptr);
+        //blockidx = @ptrCast((sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable).ptr);
+        var blockidx = sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable;
 
         //c.sqfs_blocklist_init(&sqfs.internal, @ptrCast(&inode.internal), &bl);
-        bl = try SquashFs.File.BlockList.init(sqfs, inode);
 
+        var i: usize = 0;
+        var bl = try SquashFs.File.BlockList.init(sqfs, inode);
         while (bl.remain > 0 and i < count) {
+            try bl.next(sqfs.allocator);
+
+            errdefer {
+                sqfs.allocator.free(blockidx[0..count]);
+                unreachable;
+            }
+
             if (bl.cur.offset < 4 and !first) {
                 blockidx[i].data_block = bl.block + bl.input_size;
                 blockidx[i].md_block = @intCast(@as(u64, @intCast(bl.cur.block)) - sqfs.super_block.inode_table_start);
                 i += 1;
             }
             first = false;
-
-            try bl.next(sqfs.allocator);
-            errdefer {
-                sqfs.allocator.free(blockidx[0..count]);
-                unreachable;
-            }
         }
 
-        out.* = blockidx;
-        cachep.* = blockidx;
+        cachep.* = @ptrCast(blockidx.ptr);
+        return blockidx;
     }
 
     // TODO: refactor
     pub fn blockList(
         sqfs: *SquashFs,
         inode: *SquashFs.Inode,
-        bl: *SquashFs.File.BlockList,
+        //bl: *SquashFs.File.BlockList,
         start: u64,
-        //) !SquashFs.BlockList {
-    ) !void {
-        var metablock: usize = 0;
-        var skipped: usize = 0;
-
-        var bp: **BlockIdx.Entry = undefined;
-        var blockidx: [*c]BlockIdx.Entry = undefined;
+    ) !SquashFs.File.BlockList {
+        var blockidx: []const BlockIdx.Entry = undefined;
 
         var idx: usize = 0;
 
-        bl.* = try SquashFs.File.BlockList.init(sqfs, inode);
+        var bl = try SquashFs.File.BlockList.init(sqfs, inode);
 
         const block: usize = @intCast(start / sqfs.super_block.block_size);
         if (block > bl.remain) {
             bl.remain = 0;
-            return;
+            return bl;
         }
 
-        metablock = (bl.cur.offset + block * 4) / SquashFs.metadata_size;
+        const metablock = (bl.cur.offset + block * 4) / SquashFs.metadata_size;
 
-        if (metablock == 0) return;
+        if (metablock == 0) return bl;
 
         if (!BlockIdx.indexable(
             sqfs,
             inode,
-        )) return;
+        )) return bl;
 
         idx = inode.internal.base.inode_number + 1;
 
-        //bp = @ptrCast(getCache(sqfs.allocator, @ptrCast(@alignCast(sqfs.blockidx)), idx));
-        bp = @ptrCast(sqfs.blockidx.get(idx));
-        //if (c.sqfs_cache_entry_valid(&sqfs.internal.blockidx, @ptrCast(bp)) != 0) {
+        const bp = sqfs.blockidx.get(idx);
+
         if (sqfs.blockidx.entries[idx].header.valid) {
-            blockidx = bp.*;
+            blockidx = &[_]BlockIdx.Entry{bp.entry.*};
         } else {
-            try blockidx_add(
+            blockidx = try addBlockIdx(
                 sqfs,
                 inode,
-                @ptrCast(&blockidx),
                 @ptrCast(bp),
             );
-            //@as(*BlockCacheEntry, @ptrCast(bp)).markValid();
             sqfs.blockidx.entries[idx].header.valid = true;
         }
 
-        skipped = (metablock * SquashFs.metadata_size / 4) - (bl.cur.offset / 4);
+        const skipped = (metablock * SquashFs.metadata_size / 4) - (bl.cur.offset / 4);
 
-        blockidx += metablock - 1;
+        blockidx.ptr += metablock - 1;
 
         bl.cur.block = @intCast(blockidx[0].md_block + sqfs.super_block.inode_table_start);
         bl.cur.offset %= 4;
         bl.remain -= skipped;
         bl.pos = skipped * sqfs.super_block.block_size;
         bl.block = blockidx[0].data_block;
+
+        return bl;
     }
 };
-
-fn noop() void {}

@@ -1,8 +1,14 @@
 pub const Block = @This();
+const std = @import("std");
 
 data: []u8,
 data_size: usize = 0,
 refcount: u64,
+allocator: std.mem.Allocator,
+
+pub fn deinit(block: *Block) void {
+    block.allocator.free(block.data);
+}
 
 /// Describes a SquashFS fragment block
 /// <https://dr-emann.github.io/squashfs/#datablocks-and-fragments>
