@@ -115,7 +115,7 @@ pub fn main() !void {
         }
 
         try stderr.print(
-            \\{0s}usage{s}: {2s}{3s} {1s}[{4s}-hfdxlo{1s}] <{2s}archive{1s}> [{2s}mountpoint{1s}] 
+            \\{0s}usage{s}: {2s}{3s} {1s}[{4s}-hfdxlov{1s}] <{2s}archive{1s}> [{2s}mountpoint{1s}] 
             \\{0s}description{1s}: read SquashFS images
             \\
             \\{0s}normal options{1s}:

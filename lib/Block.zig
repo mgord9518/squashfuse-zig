@@ -6,7 +6,7 @@ data_size: usize = 0,
 refcount: u64,
 allocator: std.mem.Allocator,
 
-pub fn deinit(block: *Block) void {
+pub fn deinite(block: *Block) void {
     block.allocator.free(block.data);
 }
 

@@ -72,6 +72,15 @@ pub const SquashFs = struct {
     xattr_info: XattrIdTable,
     //compression_options: Compression.Options,
 
+    // Since the caches have a finite amount of blocks at any given time, we
+    // can simply allocate all of that at once to avoid constant allocations
+    // and frees
+    cached_data_blocks: []u8,
+    cached_data_compressed_blocks: []u8,
+
+    cached_frag_blocks: []u8,
+    cached_frag_compressed_blocks: []u8,
+
     offset: u64,
 
     pub const SuperBlock = @import("super_block.zig").SuperBlock;
@@ -88,7 +97,7 @@ pub const SquashFs = struct {
 
     // TODO: multithreaded value
     pub const cached_blocks = 8;
-    pub const data_cached_blocks = 1;
+    pub const data_cached_blocks = 8;
     pub const frag_cached_blocks = 3;
     //pub const cached_blocks = 128;
     //pub const data_cached_blocks = 48;
@@ -197,36 +206,12 @@ pub const SquashFs = struct {
             .data_cache = undefined,
             .frag_cache = undefined,
             .blockidx = undefined,
+            .cached_data_blocks = undefined,
+            .cached_data_compressed_blocks = undefined,
+            .cached_frag_blocks = undefined,
+            .cached_frag_compressed_blocks = undefined,
             .offset = opts.offset,
         };
-
-        sqfs.md_cache = try Cache(
-            Block,
-        ).init(
-            sqfs.allocator,
-            SquashFs.cached_blocks,
-        );
-
-        sqfs.data_cache = try Cache(
-            Block,
-        ).init(
-            sqfs.allocator,
-            SquashFs.data_cached_blocks,
-        );
-
-        sqfs.frag_cache = try Cache(
-            Block,
-        ).init(
-            sqfs.allocator,
-            SquashFs.frag_cached_blocks,
-        );
-
-        sqfs.blockidx = try Cache(
-            *BlockIdx.Entry,
-        ).init(
-            sqfs.allocator,
-            SquashFs.frag_cached_blocks,
-        );
 
         try sqfs.load(&sqfs.super_block, opts.offset);
 
@@ -248,6 +233,53 @@ pub const SquashFs = struct {
         sqfs.super_block.directory_table_start = littleToNative(sqfs.super_block.directory_table_start);
         sqfs.super_block.fragment_table_start = littleToNative(sqfs.super_block.fragment_table_start);
         sqfs.super_block.export_table_start = littleToNative(sqfs.super_block.export_table_start);
+
+        sqfs.md_cache = try Cache(
+            Block,
+        ).init(
+            sqfs.allocator,
+            SquashFs.cached_blocks,
+        );
+
+        sqfs.cached_data_blocks = try allocator.alloc(
+            u8,
+            SquashFs.data_cached_blocks * sqfs.super_block.block_size,
+        );
+        sqfs.cached_data_compressed_blocks = try allocator.alloc(
+            u8,
+            SquashFs.data_cached_blocks * sqfs.super_block.block_size,
+        );
+        //std.debug.print("data block len {d} {d} {d}\n", .{ SquashFs.data_cached_blocks, sqfs.super_block.block_size, sqfs.cached_data_blocks.len });
+
+        sqfs.data_cache = try Cache(
+            Block,
+        ).init(
+            sqfs.allocator,
+            SquashFs.data_cached_blocks,
+        );
+
+        sqfs.cached_frag_blocks = try allocator.alloc(
+            u8,
+            SquashFs.frag_cached_blocks * sqfs.super_block.block_size,
+        );
+        sqfs.cached_frag_compressed_blocks = try allocator.alloc(
+            u8,
+            SquashFs.frag_cached_blocks * sqfs.super_block.block_size,
+        );
+
+        sqfs.frag_cache = try Cache(
+            Block,
+        ).init(
+            sqfs.allocator,
+            SquashFs.frag_cached_blocks,
+        );
+
+        sqfs.blockidx = try Cache(
+            *BlockIdx.Entry,
+        ).init(
+            sqfs.allocator,
+            SquashFs.frag_cached_blocks,
+        );
 
         sqfs.id_table = try Table(u32).init(
             allocator,
@@ -299,6 +331,25 @@ pub const SquashFs = struct {
 
         // Deinit block caches
         sqfs.md_cache.deinit();
+
+        sqfs.allocator.free(sqfs.cached_data_blocks);
+        sqfs.allocator.free(sqfs.cached_data_compressed_blocks);
+
+        for (sqfs.data_cache.entries) |*entry| {
+            if (!entry.header.valid) continue;
+
+            //entry.entry.deinit();
+        }
+
+        sqfs.allocator.free(sqfs.cached_frag_blocks);
+        sqfs.allocator.free(sqfs.cached_frag_compressed_blocks);
+
+        for (sqfs.frag_cache.entries) |*entry| {
+            if (!entry.header.valid) continue;
+
+            //entry.entry.deinit();
+        }
+
         sqfs.data_cache.deinit();
         sqfs.frag_cache.deinit();
 
@@ -523,15 +574,15 @@ pub const SquashFs = struct {
         if (idx == SquashFs.invalid_frag) return error.Error;
 
         try sqfs.frag_table.get(
-            //sqfs.arena.allocator(),
-            sqfs.allocator,
+            sqfs.arena.allocator(),
+            //sqfs.allocator,
             sqfs,
             idx,
             frag,
         );
     }
 
-    fn dataCache(
+    fn fragCache(
         sqfs: *SquashFs,
         cache: *Cache(Block),
         pos: u64,
@@ -540,15 +591,70 @@ pub const SquashFs = struct {
         //const allocator = sqfs.arena2.allocator();
         const allocator = sqfs.allocator;
 
+        const cache_current = cache.next;
+
         var entry = cache.get(@truncate(pos));
 
+        //std.debug.print("CACHE_CURRENT: {d}\n", .{cache_current});
+
+        var buf = sqfs.cached_frag_blocks[cache_current * sqfs.super_block.block_size ..][0..sqfs.super_block.block_size];
+        const compressed_frag_buf = sqfs.cached_frag_compressed_blocks[cache_current * sqfs.super_block.block_size ..][0..sqfs.super_block.block_size];
+
         if (!entry.header.valid) {
-            entry.entry = try dataBlockRead(
+            entry.entry = try blockReadIntoBuf(
                 allocator,
                 sqfs,
                 pos,
-                header,
+                !header.is_uncompressed,
+                header.size,
+                &buf,
+                compressed_frag_buf,
             );
+
+            entry.header.valid = true;
+        }
+
+        return entry.entry;
+
+        // TODO: sqfs_block_ref
+    }
+
+    fn dataCache(
+        sqfs: *SquashFs,
+        cache: *Cache(Block),
+        pos: u64,
+        header: Block.DataEntry,
+    ) !Block {
+        const allocator = sqfs.allocator;
+
+        const cache_current = cache.next;
+
+        var entry = cache.get(@truncate(pos));
+
+        var buf = sqfs.cached_data_blocks[cache_current * sqfs.super_block.block_size ..][0..sqfs.super_block.block_size];
+        const compressed_data_buf = sqfs.cached_data_compressed_blocks[cache_current * sqfs.super_block.block_size ..][0..sqfs.super_block.block_size];
+
+        if (!entry.header.valid) {
+            if (false) {
+                entry.entry = try blockRead(
+                    allocator,
+                    sqfs,
+                    pos,
+                    !header.is_uncompressed,
+                    header.size,
+                    sqfs.super_block.block_size,
+                );
+            } else {
+                entry.entry = try blockReadIntoBuf(
+                    allocator,
+                    sqfs,
+                    pos,
+                    !header.is_uncompressed,
+                    header.size,
+                    &buf,
+                    compressed_data_buf,
+                );
+            }
 
             entry.header.valid = true;
         }
@@ -643,7 +749,7 @@ pub const SquashFs = struct {
                 inode.internal.xtra.reg.frag_idx,
             );
 
-            block = try sqfs.dataCache(
+            block = try sqfs.fragCache(
                 &sqfs.frag_cache,
                 frag.start_block,
                 frag.block_header,
@@ -1462,24 +1568,54 @@ pub const SquashFs = struct {
             else => unreachable,
         }
     }
-
-    //    pub fn fragEntry(sqfs: *SquashFs, )
 };
 
-fn dataBlockRead(
+fn blockReadIntoBuf(
     allocator: std.mem.Allocator,
     sqfs: *SquashFs,
     pos: u64,
-    header: SquashFs.Block.DataEntry,
+    compressed: bool,
+    size: u32,
+    data: *[]u8,
+    decomp_in: []u8,
 ) !SquashFs.Block {
-    return blockRead(
-        allocator,
-        sqfs,
-        pos,
-        !header.is_uncompressed,
-        header.size,
-        sqfs.super_block.block_size,
-    );
+    var block = SquashFs.Block{
+        .refcount = 1,
+        .data = data.*,
+        .allocator = allocator,
+    };
+
+    if (compressed) {
+        try sqfs.load(
+            decomp_in[0..size],
+            pos + sqfs.offset,
+        );
+
+        const written = sqfs.decompressFn(
+            allocator,
+            decomp_in[0..size],
+            block.data,
+        ) catch blk: {
+            break :blk 0;
+        };
+
+        //std.debug.print("written: {d}\n", .{written});
+
+        block.data = block.data[0..written];
+
+        //std.debug.print("len    : {d}\n", .{block.data.len});
+        //block.data[0] = 'D';
+        //block.data[1] = 'E';
+    } else {
+        block.data.len = size;
+
+        try sqfs.load(
+            block.data,
+            pos + sqfs.offset,
+        );
+    }
+
+    return block;
 }
 
 fn blockRead(
@@ -1490,37 +1626,20 @@ fn blockRead(
     size: u32,
     out_size: usize,
 ) !SquashFs.Block {
-    var block = SquashFs.Block{
-        .refcount = 1,
-        .data = try allocator.alloc(u8, size),
-        .allocator = allocator,
-    };
+    var data = try allocator.alloc(u8, out_size);
 
-    try sqfs.load(
-        block.data,
-        pos + sqfs.offset,
+    const decomp_in = try allocator.alloc(u8, size);
+    defer allocator.free(decomp_in);
+
+    return try blockReadIntoBuf(
+        allocator,
+        sqfs,
+        pos,
+        compressed,
+        size,
+        &data,
+        decomp_in,
     );
-
-    if (compressed) {
-        const decomp = try allocator.alloc(u8, out_size);
-
-        const written = sqfs.decompressFn(
-            allocator,
-            block.data,
-            decomp[0..out_size],
-        ) catch blk: {
-            allocator.free(decomp);
-            break :blk 0;
-        };
-
-        allocator.free(block.data);
-
-        block.data = decomp[0..written];
-        const ret = allocator.resize(block.data, written);
-        _ = ret;
-    }
-
-    return block;
 }
 
 // Define C symbols for compression algos
