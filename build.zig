@@ -134,14 +134,17 @@ pub fn build(b: *std.Build) !void {
         exe.linkLibrary(lib);
     }
 
-    //    if (option_list.get("enable-xz").? and !option_list.get("use-zig-xz").?) {
-    //        lib.linkLibrary(try buildLiblzma(b, .{
-    //            .name = "lzma",
-    //            .target = target,
-    //            .optimize = optimize,
-    //            .strip = strip,
-    //        }));
-    //    }
+    if (option_list.get("enable-xz").? and !option_list.get("use-zig-xz").?) {
+        const lib = try buildLiblzma(b, .{
+            .name = "lzma",
+            .target = target,
+            .optimize = optimize,
+            .strip = option_list.get("strip").?,
+        });
+
+        b.installArtifact(lib);
+        exe.linkLibrary(lib);
+    }
 
     if (option_list.get("enable-lz4").?) {
         const lib = try buildLiblz4(b, .{
@@ -220,11 +223,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }));
 
-    //        unit_tests.linkLibrary(try buildLiblzma(b, .{
-    //            .name = "lzma",
-    //            .target = target,
-    //            .optimize = optimize,
-    //        }));
+    unit_tests.linkLibrary(try buildLiblzma(b, .{
+        .name = "lzma",
+        .target = target,
+        .optimize = optimize,
+    }));
 
     unit_tests.linkLibrary(try buildLiblz4(b, .{
         .name = "lz4",
