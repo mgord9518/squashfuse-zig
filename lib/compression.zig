@@ -7,6 +7,7 @@ const SquashFs = squashfuse.SquashFs;
 const SquashFsError = squashfuse.SquashFsError;
 
 pub fn builtWithDecompression(comptime compression: SquashFs.Compression) bool {
+    if (compression == .none) return true;
     return @field(build_options, "enable-" ++ @tagName(compression));
 }
 
@@ -51,6 +52,7 @@ pub fn getDecompressor(kind: SquashFs.Compression) SquashFsError!SquashFs.Decomp
                 return @import("compression/zstd_libzstd.zig").decode;
             }
         },
+        .none => return error.InvalidCompression,
     }
 
     return error.InvalidCompression;

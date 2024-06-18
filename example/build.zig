@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
         .@"enable-xz" = false,
         .@"enable-lzma" = false,
         .@"enable-lzo" = false,
-        .@"enable-lz4" = false,
+        .@"enable-lz4" = true,
         .@"enable-zstd" = false,
     });
 
@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
         squashfuse_dep.module("squashfuse"),
     );
     exe.linkLibrary(squashfuse_dep.artifact("deflate"));
+    exe.linkLibrary(squashfuse_dep.artifact("lz4"));
 
     b.installArtifact(exe);
 

@@ -36,7 +36,7 @@ pub const SuperBlock = extern struct {
         uncompressed_xattrs: bool,
         no_xattrs: bool,
         compressor_options: bool,
-        uncompressed_idx: bool,
+        uncompressed_ids: bool,
 
         UNUSED2: u4 = undefined,
     };

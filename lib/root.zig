@@ -126,6 +126,10 @@ pub const SquashFs = struct {
         lz4 = 5,
         zstd = 6,
 
+        // Not part of the file format, this will be set if all `no compression`
+        // flags are set
+        none = 257,
+
         // TODO: load this value
         pub const Options = union(Compression) {
             zlib: extern struct {
@@ -307,9 +311,27 @@ pub const SquashFs = struct {
         // TODO: XAttr support
         //try sqfs.XattrInit();
 
-        sqfs.decompressFn = try compression.getDecompressor(
+        sqfs.decompressFn = compression.getDecompressor(
             sqfs.super_block.compression,
-        );
+        ) catch |err| blk: {
+            if (err != error.InvalidCompression) return err;
+
+            const flags = sqfs.super_block.flags;
+
+            if (!flags.no_xattrs and !flags.uncompressed_xattrs) {
+                return error.InvalidCompression;
+            }
+
+            if (flags.uncompressed_inodes and
+                flags.uncompressed_data and
+                flags.uncompressed_fragments)
+            {
+                sqfs.super_block.compression = .none;
+            }
+
+            // TODO
+            break :blk undefined;
+        };
 
         // Set version
         sqfs.version = .{

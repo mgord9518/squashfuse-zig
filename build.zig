@@ -43,16 +43,14 @@ pub fn build(b: *std.Build) !void {
 
     const exe = b.addExecutable(.{
         .name = "squashfuse",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .strip = option_list.get("strip").?,
     });
 
     const squashfuse_module = b.addModule("squashfuse", .{
-        .root_source_file = .{
-            .path = "lib/root.zig",
-        },
+        .root_source_file = b.path("lib/root.zig"),
         .imports = &.{
             .{
                 .name = "build_options",
@@ -202,7 +200,7 @@ pub fn build(b: *std.Build) !void {
     try makeTestImages(b);
 
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "test/test.zig" },
+        .root_source_file = b.path("test/test.zig"),
         .target = target,
         .optimize = optimize,
         .strip = option_list.get("strip").?,
@@ -266,7 +264,7 @@ pub fn makeTestImages(b: *std.Build) anyerror!void {
             break :blk algo;
         };
 
-        _ = try std.ChildProcess.run(.{
+        _ = try std.process.Child.run(.{
             .allocator = allocator,
 
             // zig fmt: off
