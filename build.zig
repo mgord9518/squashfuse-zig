@@ -176,14 +176,6 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(exe);
 
-    // TODO: create symlinks in install directory
-    //    if (build_squashfuse_tool) {
-    //        const cwd = std.fs.cwd();
-    //
-    //        cwd.symLink("squashfuse_tool", "zig-out/bin/squashfuse_ls", .{}) catch {};
-    //        cwd.symLink("squashfuse_tool", "zig-out/bin/squashfuse_extract", .{}) catch {};
-    //    }
-
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -192,15 +184,6 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    //    var build_test_images_step = std.Build.Step.init(.{
-    //        .id = .custom,
-    //        .name = "images",
-    //        .owner = b,
-    //        .makeFn = makeTestImages,
-    //    });
-
-    try makeTestImages(b);
 
     const unit_tests = b.addTest(.{
         .root_source_file = b.path("test/test.zig"),
@@ -245,66 +228,77 @@ pub fn build(b: *std.Build) !void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
-    //test_step.dependOn(&build_test_images_step);
-}
 
-//pub fn makeTestImages(step: *std.Build.Step, prog_node: *std.Progress.Node) anyerror!void {
-pub fn makeTestImages(b: *std.Build) anyerror!void {
-    _ = b;
-    const allocator = std.heap.page_allocator;
-    //const b = step.owner;
-    //_ = prog_node;
-
-    // Generate test SquashFS images using pseudo file definitions
-    // TODO: move this into a build step and cache already built images
     const src_dir = comptime std.fs.path.dirname(@src().file) orelse ".";
+    const cwd = std.fs.cwd();
+
+    // Build test images if they don't exist
     inline for (.{ "zlib", "xz", "lzo", "lz4", "zstd" }) |algo| {
-        // For some reason zlib compression in SquashFS is referred to as
-        // gzip. It uses zlib headers, not gzip
-        const comp = if (std.mem.eql(u8, algo, "zlib")) blk: {
-            break :blk "gzip";
-        } else blk: {
-            break :blk algo;
+        cwd.access(algo, .{}) catch |err| {
+            if (err != error.FileNotFound) return err;
+
+            // For some reason zlib compression in SquashFS is referred to as
+            // gzip. It uses zlib headers, not gzip
+            const comp = if (std.mem.eql(u8, algo, "zlib")) blk: {
+                break :blk "gzip";
+            } else blk: {
+                break :blk algo;
+            };
+
+            const make_image = b.addSystemCommand(
+                &.{
+                    "mksquashfs",
+                    "-",
+                    src_dir ++ "/test/tree_" ++ algo ++ ".sqfs",
+                    "-quiet",
+                    "-comp",
+                    comp,
+                    "-noappend",
+                    "-root-owned",
+                    // The block size should be automatically tested at different
+                    // sizes in the future
+                    "-b",
+                    "1M",
+                    "-p",
+                    "/ d 644 0 0",
+                    "-p",
+                    "1 d 644 0 0",
+                    "-p",
+                    "1/TEST f 644 0 0 echo -n TEST",
+                    "-p",
+                    "2 d 644 0 0",
+                    "-p",
+                    "2/another\\ dir d 644 0 0",
+                    // TODO: cross-platform sparse file creation
+                    "-p",
+                    "2/another\\ dir/sparse_file f 644 0 0 head -c 65536 /dev/zero",
+                    "-p",
+                    "2/text f 644 0 0 cat test/test.zig",
+                    "-p",
+                    "broken_symlink s 644 0 0 I_DONT_EXIST",
+                    "-p",
+                    "symlink s 644 0 0 2/text",
+                    "-p",
+                    ("A" ** 256) ++ " f 644 0 0 true",
+                    // TODO: test timestamps
+                    "-p",
+                    "perm_400 F  696969 400 0 0 true",
+                    "-p",
+                    "perm_644 f         644 0 0 true",
+                    "-p",
+                    "perm_777 f         777 0 0 true",
+                    "-p",
+                    "block_device b     644 0 0 69 2",
+                    "-p",
+                    "character_device c 500 0 0 0  1",
+                },
+            );
+
+            test_step.dependOn(&make_image.step);
         };
-
-        _ = try std.process.Child.run(.{
-            .allocator = allocator,
-
-            // zig fmt: off
-            .argv = &.{
-                "mksquashfs",
-                "-",
-                src_dir ++ "/test/tree_" ++ algo ++ ".sqfs",
-                "-comp", comp,
-                "-noappend",
-                "-root-owned",
-                // The block size should be automatically tested at different
-                // sizes in the future
-                "-b", "1M",
-                "-p", "/ d 644 0 0",
-                "-p", "1 d 644 0 0",
-                "-p", "1/TEST f 644 0 0 echo -n TEST",
-                "-p", "2 d 644 0 0",
-                "-p", "2/another\\ dir d 644 0 0",
-                // TODO: cross-platform sparse file creation
-                "-p", "2/another\\ dir/sparse_file f 644 0 0 head -c 65536 /dev/zero",
-                "-p", "2/text f 644 0 0 cat test/test.zig",
-                "-p", "broken_symlink s 644 0 0 I_DONT_EXIST",
-                "-p", "symlink s 644 0 0 2/text",
-                "-p", ("A" ** 256) ++ " f 644 0 0 true",
-                // TODO: test timestamps
-                "-p", "perm_400 F  696969 400 0 0 true",
-                "-p", "perm_644 f         644 0 0 true",
-                "-p", "perm_777 f         777 0 0 true",
-                "-p", "block_device b     644 0 0 69 2",
-                "-p", "character_device c 500 0 0 0  1",
-            },
-            // zig fmt: on
-        });
     }
 }
 
-// TODO: replace with
 pub fn buildLiblzma(
     b: *std.Build,
     options: std.Build.ExecutableOptions,
