@@ -26,9 +26,13 @@ test "iterate dir" {
     defer sqfs.deinit();
 
     var root_inode = sqfs.getRootInode();
-    var dir = try SquashFs.Dir.open(&sqfs, &root_inode);
+    var root_dir = try SquashFs.Dir.initFromInode(&sqfs, &root_inode);
 
-    _ = try dir.openDir("2/another dir", .{});
+    var it = try root_dir.iterate();
+
+    while (try it.next()) |_| {
+        //        std.debug.print("{s}\n", .{entry.name});
+    }
 }
 
 test "open SquashFS image (zlib)" {

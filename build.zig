@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) !void {
 
         .{ "use-libdeflate", "replace zlib with faster libdeflate implementation", true },
         .{ "use-zig-zlib", "replace zlib with Zig stdlib zlib", false },
-        .{ "use-zig-xz", "replace liblzma with Zig stdlib XZ", true },
+        .{ "use-zig-xz", "replace liblzma with Zig stdlib XZ", false },
         .{ "use-zig-zstd", "replace liblzma with Zig stdlib ZSTD", false },
 
         .{ "enable-zlib", "enable zlib decompression. medium ratio, medium speed", true },
@@ -234,7 +234,7 @@ pub fn build(b: *std.Build) !void {
 
     // Build test images if they don't exist
     inline for (.{ "zlib", "xz", "lzo", "lz4", "zstd" }) |algo| {
-        cwd.access(algo, .{}) catch |err| {
+        cwd.access(src_dir ++ "/test/tree_" ++ algo ++ ".sqfs", .{}) catch |err| {
             if (err != error.FileNotFound) return err;
 
             // For some reason zlib compression in SquashFS is referred to as

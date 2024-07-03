@@ -1072,7 +1072,7 @@ pub const SquashFs = struct {
 
             // Open dir
             // TODO: add offset
-            const dir = try Dir.open(
+            const dir = try Dir.initFromInode(
                 self.parent,
                 self,
             );
@@ -1115,7 +1115,7 @@ pub const SquashFs = struct {
 
                 //               sqfs_dir_entry.name = &self.name_buf;
 
-                var iterator = Dir.Iterator{
+                var iterator = Dir.IteratorOld{
                     .name_buf = &self.name_buf,
                     .sqfs = self.parent,
                     .allocator = self.dir.parent.arena.allocator(),

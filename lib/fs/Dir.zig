@@ -85,7 +85,7 @@ pub fn openDir(dir: *Dir, sub_path: []const u8, opts: std.fs.Dir.OpenDirOptions)
     unreachable;
 }
 
-pub fn open(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
+pub fn initFromInode(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
     if (inode.kind != .directory) return error.NotDir;
 
     return .{
@@ -101,14 +101,77 @@ pub fn open(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
     };
 }
 
+pub fn iterate(dir: *Dir) !Iterator {
+    return Dir.Iterator{
+        .name_buf = undefined,
+        .sqfs = dir.sqfs,
+        .allocator = dir.sqfs.arena.allocator(),
+        .dir = dir,
+    };
+}
+
 pub const Iterator = struct {
+    sqfs: *SquashFs,
+    name_buf: [257]u8,
+    allocator: std.mem.Allocator,
+    dir: *Dir,
+
+    pub fn next(
+        iterator: *Iterator,
+    ) !?Dir.Entry {
+        var ll_entry: InternalEntry = undefined;
+        var entry: SquashFs.Dir.Entry = undefined;
+        var dir = iterator.dir;
+
+        entry.name = &iterator.name_buf;
+
+        entry.offset = dir.offset;
+
+        while (dir.header.count == 0) {
+            if (dir.offset >= dir.total) {
+                return null;
+            }
+
+            dir.offset += @sizeOf(Header);
+            try dir.cur.load(iterator.allocator, &dir.header);
+
+            dir.header = squashfuse.littleToNative(dir.header);
+            dir.header.count += 1;
+        }
+
+        dir.offset += @sizeOf(InternalEntry);
+        try dir.cur.load(iterator.allocator, &ll_entry);
+
+        ll_entry = squashfuse.littleToNative(ll_entry);
+
+        dir.header.count -= 1;
+
+        entry.kind = ll_entry.kind.toKind();
+
+        entry.name.len = ll_entry.size + 1;
+
+        entry.inode = .{
+            .block = dir.header.start_block,
+            .offset = ll_entry.offset,
+        };
+
+        entry.inode_number = dir.header.inode_number + ll_entry.inode_number;
+
+        dir.offset += entry.name.len;
+        try dir.cur.load(iterator.allocator, entry.name);
+
+        return entry;
+    }
+};
+
+pub const IteratorOld = struct {
     sqfs: *SquashFs,
     name_buf: []u8,
     allocator: std.mem.Allocator,
     dir: *Dir,
 
     pub fn next(
-        iterator: *Iterator,
+        iterator: *IteratorOld,
     ) !?Dir.Entry {
         var ll_entry: InternalEntry = undefined;
         var entry: SquashFs.Dir.Entry = undefined;
