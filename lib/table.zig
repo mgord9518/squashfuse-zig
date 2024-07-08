@@ -17,8 +17,6 @@ pub fn Table(T: type) type {
             start: usize,
             count: usize,
         ) !Self {
-            if (count == 0) unreachable;
-
             const block_count = try std.math.divCeil(
                 usize,
                 count * @sizeOf(T),
@@ -52,16 +50,16 @@ pub fn Table(T: type) type {
             const off = pos % SquashFs.metadata_block_size;
 
             var bpos = table.blocks[bnum];
-
-            // TODO: Update functions to u64
             const block = try table.sqfs.mdCache(&bpos);
 
-            var buf: T = undefined;
+            var buf: [@sizeOf(T)]u8 = undefined;
 
-            const target_u8_ptr: [*]u8 = @ptrCast(&buf);
-            @memcpy(target_u8_ptr[0..@sizeOf(T)], block.data[off..][0..@sizeOf(T)]);
+            @memcpy(
+                &buf,
+                block.data[off..][0..@sizeOf(T)],
+            );
 
-            return buf;
+            return @bitCast(buf);
         }
 
         pub fn deinit(

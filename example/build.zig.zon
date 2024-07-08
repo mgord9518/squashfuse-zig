@@ -1,12 +1,13 @@
 .{
     .name = "example",
     .version = "0.0.0",
-    .minimum_zig_version = "0.12.0",
+    .minimum_zig_version = "0.13.0",
 
     .dependencies = .{
         .squashfuse = .{
-            .url = "https://github.com/mgord9518/squashfuse-zig/archive/refs/tags/continuous.tar.gz",
-            .hash = "1220e675672f86be446965d5b779a384c81c7648e385428ed5a8858842cfa38a4e22",
+            //.url = "https://github.com/mgord9518/squashfuse-zig/archive/refs/tags/continuous.tar.gz",
+            //.hash = "1220e675672f86be446965d5b779a384c81c7648e385428ed5a8858842cfa38a4e22",
+            .path = "../",
         },
     },
 

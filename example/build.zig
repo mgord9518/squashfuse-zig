@@ -11,10 +11,11 @@ pub fn build(b: *std.Build) void {
         // These options will be renamed in the future
         .@"enable-zlib" = true,
         .@"use-libdeflate" = true,
-        .@"enable-xz" = false,
+        .@"enable-xz" = true,
+        .@"enable-lz4" = true,
+
         .@"enable-lzma" = false,
         .@"enable-lzo" = false,
-        .@"enable-lz4" = true,
         .@"enable-zstd" = false,
     });
 
@@ -25,12 +26,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // When using compression libraries implemented in C, they must be linked
+    // to the main executable
+    exe.linkLibrary(squashfuse_dep.artifact("deflate"));
+    exe.linkLibrary(squashfuse_dep.artifact("lz4"));
+    exe.linkLibrary(squashfuse_dep.artifact("lzma"));
+
     exe.root_module.addImport(
         "squashfuse",
         squashfuse_dep.module("squashfuse"),
     );
-    exe.linkLibrary(squashfuse_dep.artifact("deflate"));
-    exe.linkLibrary(squashfuse_dep.artifact("lz4"));
 
     b.installArtifact(exe);
 
