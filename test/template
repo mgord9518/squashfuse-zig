@@ -1,0 +1,6 @@
+dir  /1    644 0 0
+file /TEST 644 0 0 README.md
+
+dir  "/2"             644 0 0
+dir  "/2/another dir" 644 0 0
+file "/2/text"        644 0  test.zig d

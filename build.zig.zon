@@ -1,8 +1,8 @@
 .{
     .name = "squashfuse-zig",
-    .version = "0.1.2",
+    .version = "0.2.0",
 
-    .paths = [][]const u8 {
+    .paths = [][]const u8{
         "build.zig",
         "build.zig.zon",
         "lib",
@@ -31,10 +31,6 @@
         .liblz4 = .{
             .url = "https://github.com/lz4/lz4/archive/refs/tags/v1.9.4.tar.gz",
             .hash = "1220a9e5107eca3349d0574dc01d6c270884052bbaf397d54b8458f22d57aaef9979",
-        },
-        .libminilzo = .{
-            .url = "https://www.oberhumer.com/opensource/lzo/download/minilzo-2.10.tar.gz",
-            .hash = "1220a8ab36e23c4b6605c03ff7d625b6df9d484d861c02768b7461446812a3e5918f",
         },
         .libxz = .{
             .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.6.2.tar.gz",

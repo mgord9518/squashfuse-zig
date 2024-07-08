@@ -1,7 +1,7 @@
 const std = @import("std");
 const io = std.io;
-const squashfuse = @import("../root.zig");
-const DecompressError = squashfuse.DecompressError;
+const compression = @import("../compression.zig");
+const DecompressError = compression.DecompressError;
 
 extern fn lzma_stream_buffer_decode(
     memlemit: *u64,
@@ -46,9 +46,16 @@ pub fn decode(
         out.len,
     );
 
-    if (err != 0) {
-        return error.Error;
-    }
+    return switch (err) {
+        // Errno 2 is `LZMA_NO_CHECK`, which is only a warning according to
+        // LZMA docs
+        0, 2 => outpos,
 
-    return outpos;
+        1 => error.EndOfStream,
+        5 => error.OutOfMemory,
+        6 => error.NoSpaceLeft,
+        7, 9 => error.CorruptInput,
+
+        else => error.Error,
+    };
 }

@@ -2,50 +2,37 @@
 // algos
 
 const std = @import("std");
-const posix = std.posix;
 const fs = std.fs;
 const expect = std.testing.expect;
 const squashfuse = @import("squashfuse");
+const SquashFs = squashfuse.SquashFs;
+const allocator = std.testing.allocator;
 
-pub const SquashFsError = squashfuse.SquashFsError;
-pub const InodeId = squashfuse.InodeId;
-pub const SquashFs = squashfuse.SquashFs;
-
-const compression_algos = &[_][]const u8{
+const compression_algos = &.{
     "xz",
     "zlib",
     "zstd",
-    "lzo",
     "lz4",
 };
 
-test "iterate dir" {
-    const allocator = std.testing.allocator;
-
+test "Dir.openDir" {
     var sqfs = try SquashFs.init(allocator, "test/tree_zlib.sqfs", .{});
     defer sqfs.deinit();
 
-    var root_inode = sqfs.getRootInode();
-    var root_dir = try SquashFs.Dir.initFromInode(&sqfs, &root_inode);
+    var root_dir = sqfs.root();
+    defer root_dir.close();
 
-    var it = try root_dir.iterate();
+    var dir = try root_dir.openDir("2/another dir", .{});
+    defer dir.close();
+
+    var it = try dir.iterate();
 
     while (try it.next()) |_| {
-        //        std.debug.print("{s}\n", .{entry.name});
+        //std.debug.print("{s}\n", .{entry.name});
     }
 }
 
-test "open SquashFS image (zlib)" {
-    const allocator = std.testing.allocator;
-
-    var sqfs = try SquashFs.init(allocator, "test/tree_zlib.sqfs", .{});
-    defer sqfs.deinit();
-}
-
-// TODO: loop and test all compression algos
 test "SquashFs.Inode.walk" {
-    const allocator = std.testing.allocator;
-
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
@@ -67,11 +54,12 @@ test "SquashFs.Inode.walk" {
     }
 }
 
-test "SquashFs.Inode.Stat" {
-    const allocator = std.testing.allocator;
-
+test "Inode.Stat" {
     inline for (compression_algos) |algo| {
-        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
+        const file_path = std.fmt.comptimePrint(
+            "test/tree_{s}.sqfs",
+            .{algo},
+        );
 
         var sqfs = try SquashFs.init(allocator, file_path, .{});
         defer sqfs.deinit();
@@ -81,23 +69,22 @@ test "SquashFs.Inode.Stat" {
         var walker = try root_inode.walk(allocator);
         defer walker.deinit();
 
-        var idx: usize = 0;
-        while (try walker.next()) |entry| : (idx += 1) {
+        while (try walker.next()) |entry| {
             if (entry.path.len < 7 or !std.mem.eql(u8, entry.path[0..5], "perm_")) continue;
 
             var inode = entry.inode();
 
             const trunc_mode: u9 = @truncate((try inode.stat()).mode);
+            const trunc_modeC: u9 = @truncate((try inode.statC()).mode);
             const goal_mode = try std.fmt.parseInt(u9, entry.path[5..], 8);
 
             try expect(trunc_mode == goal_mode);
+            try expect(trunc_modeC == goal_mode);
         }
     }
 }
 
 test "devices" {
-    const allocator = std.testing.allocator;
-
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
@@ -109,8 +96,7 @@ test "devices" {
         var iterator = try root_inode.iterate();
         //defer walker.deinit();
 
-        var idx: usize = 0;
-        while (try iterator.next()) |entry| : (idx += 1) {
+        while (try iterator.next()) |entry| {
             var inode = entry.inode();
             _ = &inode;
 
@@ -141,7 +127,7 @@ test "devices" {
     }
 }
 
-fn testRead(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
+fn testRead(sqfs: *SquashFs) !void {
     var file_tree_hashmap = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
     defer file_tree_hashmap.deinit();
 
@@ -188,21 +174,17 @@ fn testRead(allocator: std.mem.Allocator, sqfs: *SquashFs) !void {
 }
 
 test "read" {
-    const allocator = std.testing.allocator;
-
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
         var sqfs = try SquashFs.init(allocator, file_path, .{});
         defer sqfs.deinit();
 
-        try testRead(allocator, &sqfs);
+        try testRead(sqfs);
     }
 }
 
 test "read link" {
-    const allocator = std.testing.allocator;
-
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
@@ -214,13 +196,14 @@ test "read link" {
         var walker = try root_inode.walk(allocator);
         defer walker.deinit();
 
-        var idx: usize = 0;
-        while (try walker.next()) |entry| : (idx += 1) {
+        while (try walker.next()) |entry| {
             if (!std.mem.eql(u8, entry.path, "symlink")) {
                 continue;
             }
 
-            var buf: [fs.MAX_PATH_BYTES]u8 = undefined;
+            const goal = "2/text";
+
+            var buf: [goal.len]u8 = undefined;
             var inode = entry.inode();
 
             const link_target = try inode.readLink(&buf);
@@ -228,8 +211,13 @@ test "read link" {
             try expect(std.mem.eql(
                 u8,
                 link_target,
-                "2/text",
+                goal,
             ));
+
+            var small_buf: [goal.len - 1]u8 = undefined;
+            _ = inode.readLink(&small_buf) catch |err| {
+                try expect(err == error.NoSpaceLeft);
+            };
         }
     }
 }

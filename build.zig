@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) !void {
 
         .{ "enable-zlib", "enable zlib decompression. medium ratio, medium speed", true },
         .{ "enable-lzma", "deprecated and not yet supported", false },
-        .{ "enable-lzo", "enable lzo decompression. low ratio, fast speed", true },
+        .{ "enable-lzo", "unsupported due to licensing", false },
         .{ "enable-xz", "enable xz decompression. very high ratio, slow speed", true },
         .{ "enable-lz4", "enable lz4 decompression. low ratio, very fast speed", true },
         .{ "enable-zstd", "enable zstd decompression. high ratio, fast speed", true },
@@ -98,7 +98,6 @@ pub fn build(b: *std.Build) !void {
         if (option_list.get("use-system-fuse").?) {
             exe.linkSystemLibrary("fuse3");
         } else {
-            //b.installArtifact(fuse_dep.artifact("fuse"));
             exe.linkLibrary(fuse_dep.artifact("fuse"));
         }
     }
@@ -120,18 +119,6 @@ pub fn build(b: *std.Build) !void {
             // a system library on essentially every Linux distro
             exe.linkSystemLibrary("zlib");
         }
-    }
-
-    if (option_list.get("enable-lzo").?) {
-        const lib = try buildLiblzo(b, .{
-            .name = "lzo",
-            .target = target,
-            .optimize = optimize,
-            .strip = option_list.get("strip").?,
-        });
-
-        b.installArtifact(lib);
-        exe.linkLibrary(lib);
     }
 
     if (option_list.get("enable-xz").? and !option_list.get("use-zig-xz").?) {
@@ -200,12 +187,6 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     }));
 
-    unit_tests.linkLibrary(try buildLiblzo(b, .{
-        .name = "lzo",
-        .target = target,
-        .optimize = optimize,
-    }));
-
     unit_tests.linkLibrary(try buildLiblzma(b, .{
         .name = "lzma",
         .target = target,
@@ -233,7 +214,7 @@ pub fn build(b: *std.Build) !void {
     const cwd = std.fs.cwd();
 
     // Build test images if they don't exist
-    inline for (.{ "zlib", "xz", "lzo", "lz4", "zstd" }) |algo| {
+    inline for (.{ "zlib", "xz", "lz4", "zstd" }) |algo| {
         cwd.access(src_dir ++ "/test/tree_" ++ algo ++ ".sqfs", .{}) catch |err| {
             if (err != error.FileNotFound) return err;
 
@@ -246,7 +227,7 @@ pub fn build(b: *std.Build) !void {
             };
 
             const make_image = b.addSystemCommand(
-                &.{
+                &[_][]const u8{
                     "mksquashfs",
                     "-",
                     src_dir ++ "/test/tree_" ++ algo ++ ".sqfs",
@@ -329,33 +310,7 @@ pub fn buildLiblzma(
     lib.defineCMacro("HAVE_STDINT_H", "1");
     lib.defineCMacro("HAVE_DECODER_LZMA1", "1");
     lib.defineCMacro("HAVE_DECODER_LZMA2", "1");
-
-    lib.defineCMacro("HAVE_SMALL", "1");
-
-    const c_files = &[_][]const u8{
-        "src/liblzma/check/check.c",
-        "src/liblzma/check/crc32_small.c",
-        "src/liblzma/check/crc32_table.c",
-        "src/liblzma/common/block_decoder.c",
-        "src/liblzma/common/block_header_decoder.c",
-        "src/liblzma/common/block_util.c",
-        "src/liblzma/common/common.c",
-        "src/liblzma/common/filter_common.c",
-        "src/liblzma/common/filter_decoder.c",
-        "src/liblzma/common/filter_flags_decoder.c",
-        "src/liblzma/common/index_hash.c",
-        "src/liblzma/common/stream_buffer_decoder.c",
-        "src/liblzma/common/stream_decoder.c",
-        "src/liblzma/common/stream_flags_common.c",
-        "src/liblzma/common/stream_flags_decoder.c",
-        "src/liblzma/common/vli_decoder.c",
-        "src/liblzma/common/vli_size.c",
-        "src/liblzma/lz/lz_decoder.c",
-        "src/liblzma/lzma/lzma2_decoder.c",
-        "src/liblzma/lzma/lzma_decoder.c",
-        "src/liblzma/simple/simple_coder.c",
-        "src/liblzma/simple/simple_decoder.c",
-    };
+    lib.defineCMacro("HAVE_CHECK_CRC32", "1");
 
     const arch = options.target.result.cpu.arch;
 
@@ -365,24 +320,51 @@ pub fn buildLiblzma(
         lib.defineCMacro("HAVE_DECODER_X86", "1");
         lib.addCSourceFile(.{
             .file = libxz_dep.path("src/liblzma/simple/x86.c"),
-            .flags = &[_][]const u8{},
         });
-    }
-
-    if (arch.isARM()) {
+    } else if (arch.isARM()) {
         lib.defineCMacro("HAVE_DECODER_ARM", "1");
         lib.addCSourceFile(.{
             .file = libxz_dep.path("src/liblzma/simple/arm.c"),
-            .flags = &[_][]const u8{},
+        });
+    } else if (arch.isAARCH64()) {
+        lib.defineCMacro("HAVE_DECODER_ARM64", "1");
+        lib.addCSourceFile(.{
+            .file = libxz_dep.path("src/liblzma/simple/arm64.c"),
+        });
+    } else if (arch.isRISCV()) {
+        lib.defineCMacro("HAVE_DECODER_RISCV", "1");
+        lib.addCSourceFile(.{
+            .file = libxz_dep.path("src/liblzma/simple/riscv.c"),
         });
     }
 
-    for (c_files) |c_file| {
-        lib.addCSourceFile(.{
-            .file = libxz_dep.path(c_file),
-            .flags = &[_][]const u8{},
-        });
-    }
+    lib.addCSourceFiles(.{
+        .root = libxz_dep.path("."),
+        .files = &.{
+            "src/liblzma/check/check.c",
+            "src/liblzma/check/crc32_fast.c",
+            "src/liblzma/check/crc32_table.c",
+            "src/liblzma/common/block_decoder.c",
+            "src/liblzma/common/block_header_decoder.c",
+            "src/liblzma/common/block_util.c",
+            "src/liblzma/common/common.c",
+            "src/liblzma/common/filter_common.c",
+            "src/liblzma/common/filter_decoder.c",
+            "src/liblzma/common/filter_flags_decoder.c",
+            "src/liblzma/common/index_hash.c",
+            "src/liblzma/common/stream_buffer_decoder.c",
+            "src/liblzma/common/stream_decoder.c",
+            "src/liblzma/common/stream_flags_common.c",
+            "src/liblzma/common/stream_flags_decoder.c",
+            "src/liblzma/common/vli_decoder.c",
+            "src/liblzma/common/vli_size.c",
+            "src/liblzma/lz/lz_decoder.c",
+            "src/liblzma/lzma/lzma2_decoder.c",
+            "src/liblzma/lzma/lzma_decoder.c",
+            "src/liblzma/simple/simple_coder.c",
+            "src/liblzma/simple/simple_decoder.c",
+        },
+    });
 
     lib.linkLibC();
 
@@ -416,7 +398,6 @@ pub fn buildLibdeflate(
     for (c_files) |c_file| {
         lib.addCSourceFile(.{
             .file = libdeflate_dep.path(c_file),
-            .flags = &[_][]const u8{},
         });
     }
 
@@ -425,40 +406,12 @@ pub fn buildLibdeflate(
     if (arch.isX86()) {
         lib.addCSourceFile(.{
             .file = libdeflate_dep.path("lib/x86/cpu_features.c"),
-            .flags = &[_][]const u8{},
         });
     } else if (arch.isARM() or arch.isAARCH64()) {
         lib.addCSourceFile(.{
             .file = libdeflate_dep.path("lib/arm/cpu_features.c"),
-            .flags = &[_][]const u8{},
         });
     }
-
-    lib.linkLibC();
-
-    return lib;
-}
-
-pub fn buildLiblzo(
-    b: *std.Build,
-    options: std.Build.ExecutableOptions,
-) !*std.Build.Step.Compile {
-    const lib = b.addStaticLibrary(.{
-        .name = "lzo",
-        .target = options.target,
-        .optimize = options.optimize,
-        .strip = options.strip orelse false,
-    });
-
-    const liblzo_dep = b.dependency("libminilzo", .{
-        .target = options.target,
-        .optimize = options.optimize,
-    });
-
-    lib.addCSourceFile(.{
-        .file = liblzo_dep.path("minilzo.c"),
-        .flags = &[_][]const u8{},
-    });
 
     lib.linkLibC();
 
@@ -483,7 +436,6 @@ pub fn buildLiblz4(
 
     lib.addCSourceFile(.{
         .file = liblz4_dep.path("lib/lz4.c"),
-        .flags = &[_][]const u8{},
     });
 
     lib.linkLibC();

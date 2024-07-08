@@ -6,7 +6,7 @@
 a.out
 *.sqfs
 zig-out
-zig-cache
+.zig-cache
 mnt
 benchmark
 squashfs-root

@@ -8,7 +8,7 @@ const SquashFs = squashfuse.SquashFs;
 pub const FuseOperations = struct {
     // Struct for holding our FUSE info
     pub const Squash = struct {
-        image: SquashFs,
+        image: *SquashFs,
         file_tree: std.StringArrayHashMap(SquashFs.Inode.Walker.Entry),
     };
 

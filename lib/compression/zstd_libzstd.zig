@@ -1,8 +1,8 @@
 const std = @import("std");
-const squashfuse = @import("../root.zig");
-const DecompressError = squashfuse.DecompressError;
+const compression = @import("../compression.zig");
+const DecompressError = compression.DecompressError;
 
-extern fn ZSTD_isError(usize) bool;
+extern fn ZSTD_getErrorCode(usize) usize;
 extern fn ZSTD_decompress(
     [*]u8,
     usize,
@@ -24,9 +24,14 @@ pub fn decode(
         in.len,
     );
 
-    if (ZSTD_isError(ret)) {
-        return DecompressError.Error;
-    }
+    return switch (ZSTD_getErrorCode(ret)) {
+        0 => ret,
 
-    return ret;
+        20 => error.CorruptInput,
+        22 => error.WrongChecksum,
+        64 => error.OutOfMemory,
+        70 => error.NoSpaceLeft,
+
+        else => error.Error,
+    };
 }

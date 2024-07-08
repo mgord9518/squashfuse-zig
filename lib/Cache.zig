@@ -11,7 +11,10 @@ pub fn Cache(T: type) type {
         allocator: std.mem.Allocator,
 
         entries: []Entry,
+        data: []u8,
+        compressed_data: []u8,
 
+        data_size: usize,
         count: usize,
         next: usize,
 
@@ -28,6 +31,7 @@ pub fn Cache(T: type) type {
         pub fn init(
             allocator: std.mem.Allocator,
             count: usize,
+            data_size: usize,
         ) !Self {
             const cache = .{
                 .allocator = allocator,
@@ -37,6 +41,15 @@ pub fn Cache(T: type) type {
                     Entry,
                     count,
                 ),
+                .data = try allocator.alloc(
+                    u8,
+                    count * data_size,
+                ),
+                .compressed_data = try allocator.alloc(
+                    u8,
+                    count * data_size,
+                ),
+                .data_size = data_size,
             };
 
             @memset(cache.entries, .{
@@ -51,15 +64,9 @@ pub fn Cache(T: type) type {
         }
 
         pub fn deinit(cache: *Self) void {
-            // TODO: why does this segfault?
-            //            for (cache.entries) |*entry| {
-            //                if (!entry.header.valid) continue;
-            //
-            //                if (@typeInfo(T) == .Struct and @hasDecl(T, "deinit")) {
-            //                    entry.entry.deinit();
-            //                }
-            //            }
             cache.allocator.free(cache.entries);
+            cache.allocator.free(cache.data);
+            cache.allocator.free(cache.compressed_data);
         }
 
         // TODO
@@ -91,14 +98,10 @@ pub fn Cache(T: type) type {
                 }
             }
 
-            // Move to the next entry, free and invalidate what was there
+            // Move to the next entry, invalidate what was there
             // so we can put something else there
             const entry = &ch.entries[ch.next];
             if (entry.header.valid) {
-                if (@typeInfo(T) == .Struct and @hasDecl(T, "deinit")) {
-                    entry.entry.deinit();
-                }
-
                 entry.header.valid = false;
             }
 
@@ -128,7 +131,7 @@ pub const BlockIdx = struct {
         );
 
         const md_size = blocks * @sizeOf(u32);
-        return md_size >= SquashFs.metadata_size;
+        return md_size >= SquashFs.metadata_block_size;
     }
 
     // TODO: refactor
@@ -141,17 +144,14 @@ pub const BlockIdx = struct {
 
         const blocks = SquashFs.File.BlockList.count(sqfs, inode);
         const md_size = blocks * 4;
-        const count = (inode.internal.next.offset + md_size - 1) / SquashFs.metadata_size;
+        const count = (inode.internal.next.offset + md_size - 1) / SquashFs.metadata_block_size;
 
-        //blockidx = @ptrCast((sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable).ptr);
         var blockidx = sqfs.allocator.alloc(BlockIdx.Entry, count) catch unreachable;
-
-        //c.sqfs_blocklist_init(&sqfs.internal, @ptrCast(&inode.internal), &bl);
 
         var i: usize = 0;
         var bl = try SquashFs.File.BlockList.init(sqfs, inode);
         while (bl.remain > 0 and i < count) {
-            try bl.next(sqfs.allocator);
+            try bl.next();
 
             errdefer {
                 sqfs.allocator.free(blockidx[0..count]);
@@ -189,7 +189,7 @@ pub const BlockIdx = struct {
             return bl;
         }
 
-        const metablock = (bl.cur.offset + block * 4) / SquashFs.metadata_size;
+        const metablock = (bl.cur.offset + block * 4) / SquashFs.metadata_block_size;
 
         if (metablock == 0) return bl;
 
@@ -213,7 +213,7 @@ pub const BlockIdx = struct {
             sqfs.blockidx.entries[idx].header.valid = true;
         }
 
-        const skipped = (metablock * SquashFs.metadata_size / 4) - (bl.cur.offset / 4);
+        const skipped = (metablock * SquashFs.metadata_block_size / 4) - (bl.cur.offset / 4);
 
         blockidx.ptr += metablock - 1;
 

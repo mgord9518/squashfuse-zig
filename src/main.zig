@@ -85,7 +85,7 @@ pub fn main() !void {
     // Skip ARGV0
     try args.append(args_it.next().?);
 
-    var sqfs: SquashFs = undefined;
+    var sqfs: *SquashFs = undefined;
 
     // TODO: move formatting code into its own function or possibly new package
     if (res.args.help != 0 or res.positionals.len == 0) {
@@ -193,7 +193,7 @@ pub fn main() !void {
         , .{ orange, reset, cyan });
 
         var can_decompress = false;
-        inline for (comptime std.meta.tags(SquashFs.Compression)) |algo| {
+        inline for (comptime std.meta.tags(squashfuse.compression.Compression)) |algo| {
             if (squashfuse.compression.builtWithDecompression(algo)) {
                 can_decompress = true;
 
@@ -312,7 +312,7 @@ pub fn main() !void {
     if (res.args.extract != 0) {
         extractArchive(
             allocator,
-            &sqfs,
+            sqfs,
             src,
             dest,
             .{ .verbose = res.args.verbose != 0 },
@@ -511,7 +511,9 @@ fn extractArchive(
         }
 
         var inode = entry.inode();
-        try inode.extract(buf, prefixed_dest);
+        inode.extract(buf, prefixed_dest) catch |err| {
+            std.debug.print("extract error: {!}\n", .{err});
+        };
     }
 
     // TODO: better error message

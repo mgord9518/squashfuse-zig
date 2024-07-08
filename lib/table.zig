@@ -1,5 +1,4 @@
 const std = @import("std");
-const os = std.os;
 
 const squashfuse = @import("root.zig");
 const SquashFs = squashfuse.SquashFs;
@@ -9,6 +8,7 @@ pub fn Table(T: type) type {
         const Self = @This();
 
         allocator: std.mem.Allocator,
+        sqfs: *SquashFs,
         blocks: []u64,
 
         pub fn init(
@@ -17,18 +17,16 @@ pub fn Table(T: type) type {
             start: usize,
             count: usize,
         ) !Self {
-            if (count == 0) return .{
-                .allocator = allocator,
-                .blocks = &[_]u64{},
-            };
+            if (count == 0) unreachable;
 
             const block_count = try std.math.divCeil(
                 usize,
                 count * @sizeOf(T),
-                SquashFs.metadata_size,
+                SquashFs.metadata_block_size,
             );
 
             const table = Self{
+                .sqfs = sqfs,
                 .allocator = allocator,
                 .blocks = try allocator.alloc(u64, block_count),
             };
@@ -47,24 +45,23 @@ pub fn Table(T: type) type {
 
         pub fn get(
             table: *Self,
-            allocator: std.mem.Allocator,
-            sqfs: *SquashFs,
             idx: usize,
-            buf: *T,
-        ) !void {
+        ) !T {
             const pos = idx * @sizeOf(T);
-            const bnum = pos / SquashFs.metadata_size;
-            const off = pos % SquashFs.metadata_size;
+            const bnum = pos / SquashFs.metadata_block_size;
+            const off = pos % SquashFs.metadata_block_size;
 
             var bpos = table.blocks[bnum];
 
             // TODO: Update functions to u64
-            const block = try sqfs.mdCache(allocator, &bpos);
+            const block = try table.sqfs.mdCache(&bpos);
 
-            const target_u8_ptr: [*]u8 = @ptrCast(buf);
+            var buf: T = undefined;
+
+            const target_u8_ptr: [*]u8 = @ptrCast(&buf);
             @memcpy(target_u8_ptr[0..@sizeOf(T)], block.data[off..][0..@sizeOf(T)]);
 
-            // TODO c.sqfs_block_dispose
+            return buf;
         }
 
         pub fn deinit(

@@ -1,12 +1,16 @@
+// SquashFS superblock
+// <https://dr-emann.github.io/squashfs/#superblock>
+
 const SquashFs = @import("root.zig").SquashFs;
+const compression = @import("compression.zig");
 
 pub const SuperBlock = extern struct {
-    magic: u32,
+    magic: [4]u8,
     inode_count: u32,
     modification_time: u32,
     block_size: u32,
     fragment_entry_count: u32,
-    compression: SquashFs.Compression,
+    compression: compression.Compression,
     block_log: u16,
     flags: Flags,
     id_count: u16,
@@ -26,7 +30,7 @@ pub const SuperBlock = extern struct {
         uncompressed_data: bool,
 
         // `check` flag; unused in SquashFS 4.0+
-        UNUSED: u1 = undefined,
+        _UNUSED: u1 = undefined,
 
         uncompressed_fragments: bool,
         no_fragments: bool,
@@ -38,7 +42,7 @@ pub const SuperBlock = extern struct {
         compressor_options: bool,
         uncompressed_ids: bool,
 
-        UNUSED2: u4 = undefined,
+        _: u4 = undefined,
     };
 
     pub const InodeBase = extern struct {
@@ -123,8 +127,8 @@ pub const SuperBlock = extern struct {
             return inode.dev.major_dev;
         }
 
-        pub fn minor(inode: DevInode) u16 {
-            return (@as(u16, inode.dev.minor_dev_extended) << 8) + inode.dev.minor_dev;
+        pub fn minor(inode: DevInode) u20 {
+            return (@as(u20, inode.dev.minor_dev_extended) << 8) + inode.dev.minor_dev;
         }
     };
 

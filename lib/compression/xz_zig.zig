@@ -1,6 +1,6 @@
 const std = @import("std");
-const squashfuse = @import("../root.zig");
-const DecompressError = squashfuse.DecompressError;
+const compression = @import("../compression.zig");
+const DecompressError = compression.DecompressError;
 
 pub fn decode(
     allocator: std.mem.Allocator,
@@ -16,5 +16,13 @@ pub fn decode(
 
     defer decompressor.deinit();
 
-    return decompressor.read(out) catch return error.Error;
+    return decompressor.read(out) catch |err| {
+        return switch (err) {
+            error.CorruptInput => error.CorruptInput,
+            error.EndOfStream => error.EndOfStream,
+            error.WrongChecksum => error.WrongChecksum,
+
+            else => error.Error,
+        };
+    };
 }

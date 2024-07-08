@@ -1,6 +1,6 @@
 const std = @import("std");
-const squashfuse = @import("../root.zig");
-const DecompressError = squashfuse.DecompressError;
+const compression = @import("../compression.zig");
+const DecompressError = compression.DecompressError;
 
 extern fn libdeflate_zlib_decompress(
     *anyopaque,
@@ -66,7 +66,7 @@ pub fn decode(
         // Defined in <https://github.com/ebiggers/libdeflate/blob/master/libdeflate.h>
         0 => written,
 
-        1 => DecompressError.BadData,
+        1 => DecompressError.CorruptInput,
         2 => DecompressError.ShortOutput,
         3 => DecompressError.NoSpaceLeft,
         else => DecompressError.Error,

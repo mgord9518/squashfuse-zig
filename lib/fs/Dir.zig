@@ -6,10 +6,13 @@ const assert = std.debug.assert;
 
 pub const Dir = @This();
 
+// Must be a string allocated by `sqfs.allocator`
+path: ?[]const u8 = null,
+
 sqfs: *SquashFs,
 cur: SquashFs.MetadataCursor,
 offset: u64,
-total: u64,
+size: u64,
 header: Header,
 
 pub const Entry = struct {
@@ -28,9 +31,8 @@ const InternalEntry = packed struct(u64) {
     offset: u16,
     inode_number: u16,
 
-    // InternalKind only needs a u4 but the datatype draws in 16 bits for it
     kind: InternalKind,
-    UNUSED: u12,
+    _: u12,
 
     size: u16,
 
@@ -43,46 +45,83 @@ pub const Header = extern struct {
     inode_number: u32,
 };
 
-// TODO: properly handle paths starting with `/`
-//pub fn openDir(dir: *Dir, sub_path: []const u8, opts: std.fs.Dir.OpenDirOptions) std.fs.Dir.OpenError!Dir {
-pub fn openDir(dir: *Dir, sub_path: []const u8, opts: std.fs.Dir.OpenDirOptions) !Dir {
-    _ = opts;
+fn populateInodeMapIfNull(sqfs: *SquashFs) !void {
+    if (sqfs.inode_map == null) {
+        sqfs.inode_map = std.StringHashMap(
+            SquashFs.Inode.TableEntry,
+        ).init(sqfs.allocator);
 
-    var arena = std.heap.ArenaAllocator.init(dir.sqfs.allocator);
-    defer arena.deinit();
+        var root_inode = sqfs.getRootInode();
+        var walker = try root_inode.walk(sqfs.allocator);
+        defer walker.deinit();
 
-    var name_buf: [257]u8 = undefined;
-
-    // Find the highest directory in the pathname
-    var target = sub_path;
-    var idx: usize = 0;
-    while (std.fs.path.dirname(target)) |new_target| {
-        target = new_target;
-        idx += 1;
-    }
-
-    var iterator = Dir.Iterator{
-        .name_buf = &name_buf,
-        .sqfs = dir.sqfs,
-        .allocator = arena.allocator(),
-        .dir = dir,
-    };
-
-    while (try iterator.next()) |entry| {
-        if (std.mem.eql(u8, entry.name, target)) {
-            if (idx == 0) {
-                return dir.*;
-            }
-
-            const inode_number = entry.inode;
-            var inode = try dir.sqfs.getInode(inode_number);
-            var new_dir = try Dir.open(dir.sqfs, &inode);
-
-            return new_dir.openDir(sub_path[target.len + 1 ..], .{});
+        while (try walker.next()) |entry| {
+            try sqfs.inode_map.?.put(
+                try sqfs.allocator.dupe(u8, entry.path),
+                entry.id,
+            );
         }
     }
+}
 
-    unreachable;
+pub fn openDir(
+    dir: *Dir,
+    sub_path: []const u8,
+    opts: std.fs.Dir.OpenDirOptions,
+) !Dir {
+    _ = opts;
+
+    var sqfs = dir.sqfs;
+
+    try populateInodeMapIfNull(sqfs);
+
+    const resolved = try std.fs.path.resolve(
+        sqfs.allocator,
+        &.{ dir.path.?, sub_path },
+    );
+
+    const inode_entry = sqfs.inode_map.?.get(
+        resolved,
+    ) orelse unreachable;
+
+    return Dir.initFromInodeTableEntry(
+        sqfs,
+        inode_entry,
+        resolved,
+    );
+}
+
+pub fn close(dir: *Dir) void {
+    if (dir.path) |path| {
+        dir.sqfs.allocator.free(path);
+        dir.path = null;
+    }
+}
+
+// Low-level init function for internal usage
+pub fn initFromInodeTableEntry(
+    sqfs: *SquashFs,
+    table_entry: SquashFs.Inode.TableEntry,
+    path: []const u8,
+) !Dir {
+    const inode = try sqfs.getInode(table_entry);
+
+    if (inode.kind != .directory) return error.NotDir;
+
+    const start_block = inode.internal.xtra.dir.start_block;
+
+    return .{
+        .sqfs = sqfs,
+        .cur = .{
+            .sqfs = sqfs,
+            .block = sqfs.super_block.directory_table_start + start_block,
+            .offset = inode.internal.xtra.dir.offset,
+        },
+        .offset = 0,
+        .size = inode.internal.xtra.dir.size -| 3,
+        .header = std.mem.zeroes(Header),
+        .path = path,
+    };
 }
 
 pub fn initFromInode(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
@@ -96,7 +135,7 @@ pub fn initFromInode(sqfs: *SquashFs, inode: *SquashFs.Inode) !Dir {
             .offset = inode.internal.xtra.dir.offset,
         },
         .offset = 0,
-        .total = @intCast(inode.internal.xtra.dir.size -| 3),
+        .size = @intCast(inode.internal.xtra.dir.size -| 3),
         .header = std.mem.zeroes(Header),
     };
 }
@@ -105,7 +144,6 @@ pub fn iterate(dir: *Dir) !Iterator {
     return Dir.Iterator{
         .name_buf = undefined,
         .sqfs = dir.sqfs,
-        .allocator = dir.sqfs.arena.allocator(),
         .dir = dir,
     };
 }
@@ -113,7 +151,6 @@ pub fn iterate(dir: *Dir) !Iterator {
 pub const Iterator = struct {
     sqfs: *SquashFs,
     name_buf: [257]u8,
-    allocator: std.mem.Allocator,
     dir: *Dir,
 
     pub fn next(
@@ -128,19 +165,19 @@ pub const Iterator = struct {
         entry.offset = dir.offset;
 
         while (dir.header.count == 0) {
-            if (dir.offset >= dir.total) {
+            if (dir.offset >= dir.size) {
                 return null;
             }
 
             dir.offset += @sizeOf(Header);
-            try dir.cur.load(iterator.allocator, &dir.header);
+            try dir.cur.load(&dir.header);
 
             dir.header = squashfuse.littleToNative(dir.header);
             dir.header.count += 1;
         }
 
         dir.offset += @sizeOf(InternalEntry);
-        try dir.cur.load(iterator.allocator, &ll_entry);
+        try dir.cur.load(&ll_entry);
 
         ll_entry = squashfuse.littleToNative(ll_entry);
 
@@ -158,7 +195,7 @@ pub const Iterator = struct {
         entry.inode_number = dir.header.inode_number + ll_entry.inode_number;
 
         dir.offset += entry.name.len;
-        try dir.cur.load(iterator.allocator, entry.name);
+        try dir.cur.load(entry.name);
 
         return entry;
     }
@@ -167,7 +204,6 @@ pub const Iterator = struct {
 pub const IteratorOld = struct {
     sqfs: *SquashFs,
     name_buf: []u8,
-    allocator: std.mem.Allocator,
     dir: *Dir,
 
     pub fn next(
@@ -182,19 +218,19 @@ pub const IteratorOld = struct {
         entry.offset = dir.offset;
 
         while (dir.header.count == 0) {
-            if (dir.offset >= dir.total) {
+            if (dir.offset >= dir.size) {
                 return null;
             }
 
             dir.offset += @sizeOf(Header);
-            try dir.cur.load(iterator.allocator, &dir.header);
+            try dir.cur.load(&dir.header);
 
             dir.header = squashfuse.littleToNative(dir.header);
             dir.header.count += 1;
         }
 
         dir.offset += @sizeOf(InternalEntry);
-        try dir.cur.load(iterator.allocator, &ll_entry);
+        try dir.cur.load(&ll_entry);
 
         ll_entry = squashfuse.littleToNative(ll_entry);
 
@@ -212,7 +248,7 @@ pub const IteratorOld = struct {
         entry.inode_number = dir.header.inode_number + ll_entry.inode_number;
 
         dir.offset += entry.name.len;
-        try dir.cur.load(iterator.allocator, entry.name);
+        try dir.cur.load(entry.name);
 
         return entry;
     }

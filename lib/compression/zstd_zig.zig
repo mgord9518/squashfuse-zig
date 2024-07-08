@@ -1,6 +1,6 @@
 const std = @import("std");
-const squashfuse = @import("../root.zig");
-const DecompressError = squashfuse.DecompressError;
+const compression = @import("../compression.zig");
+const DecompressError = compression.DecompressError;
 
 pub fn decode(
     allocator: std.mem.Allocator,
