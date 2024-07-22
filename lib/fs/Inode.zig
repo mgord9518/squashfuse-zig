@@ -14,7 +14,7 @@ pub const build_options = @import("build_options");
 const squashfuse = @import("../root.zig");
 const SquashFs = squashfuse.SquashFs;
 const SuperBlock = SquashFs.SuperBlock;
-const BlockIdx = @import("../Cache.zig").BlockIdx;
+const BlockIdx = @import("../cache.zig").BlockIdx;
 
 const Inode = @This();
 
@@ -517,7 +517,8 @@ pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
 
         .directory => {
             try cwd.makeDir(dest);
-            if (std.fs.has_executable_bit) {
+            // TODO: Why does this cause BADF?
+            if (false and std.fs.has_executable_bit) {
                 var d = try cwd.openDir(dest, .{});
                 defer d.close();
 

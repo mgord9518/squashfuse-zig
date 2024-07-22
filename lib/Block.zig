@@ -3,7 +3,6 @@ const std = @import("std");
 
 data: []u8,
 data_size: usize = 0,
-allocator: std.mem.Allocator,
 
 /// Describes a SquashFS fragment block
 /// <https://dr-emann.github.io/squashfs/#datablocks-and-fragments>

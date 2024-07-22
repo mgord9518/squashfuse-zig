@@ -7,110 +7,105 @@ const assert = std.debug.assert;
 pub fn Cache(T: type) type {
     return struct {
         const Self = @This();
-
         allocator: std.mem.Allocator,
 
-        entries: []Entry,
-        data: []u8,
-        compressed_data: []u8,
+        entry_idxs: []u64,
+        entries: []T,
+        data: ?[]u8,
+        compressed_data: ?[]u8,
 
-        data_size: usize,
         count: usize,
-        next: usize,
+
+        pos: usize = 0,
+
+        pub const Options = struct {
+            block_size: usize = 0,
+        };
 
         pub const Entry = struct {
-            header: Header,
+            idx: u64,
             entry: T,
-
-            pub const Header = packed struct(u64) {
-                idx: u63,
-                valid: bool,
-            };
         };
 
         pub fn init(
             allocator: std.mem.Allocator,
             count: usize,
-            data_size: usize,
+            opts: Options,
         ) !Self {
             const cache = .{
                 .allocator = allocator,
                 .count = count,
-                .next = 0,
                 .entries = try allocator.alloc(
-                    Entry,
+                    T,
+                    count,
+                ),
+                .entry_idxs = try allocator.alloc(
+                    u64,
                     count,
                 ),
                 .data = try allocator.alloc(
                     u8,
-                    count * data_size,
+                    count * opts.block_size,
                 ),
                 .compressed_data = try allocator.alloc(
                     u8,
-                    count * data_size,
+                    count * opts.block_size,
                 ),
-                .data_size = data_size,
             };
 
-            @memset(cache.entries, .{
-                .entry = undefined,
-                .header = .{
-                    .idx = 0,
-                    .valid = false,
-                },
-            });
+            @memset(cache.entry_idxs, SquashFs.invalid_block);
 
             return cache;
         }
 
         pub fn deinit(cache: *Self) void {
+            cache.allocator.free(cache.entry_idxs);
             cache.allocator.free(cache.entries);
-            cache.allocator.free(cache.data);
-            cache.allocator.free(cache.compressed_data);
+
+            if (cache.data) |data| {
+                cache.allocator.free(data);
+            }
+
+            if (cache.compressed_data) |compressed_data| {
+                cache.allocator.free(compressed_data);
+            }
         }
 
-        // TODO
-        //        pub fn put(cache: *Self, idx, usize, item: T) void {
-        //
-        //            for (ch.entries) |*ent| {
-        //                std.debug.print(
-        //                    "idx {d}\n",
-        //                    .{ent.header.idx},
-        //                );
-        //                if (ent.header.idx == idx) {
-        //                    assert(ent.header.valid);
-        //
-        //                    return ent;
-        //                }
-        //            }
-        //        }
+        pub fn get(cache: *Self, id: u64) ?T {
+            const ptr = cache.getPtr(id);
 
-        pub fn get(
-            ch: *Self,
-            idx: u64,
-        ) *Entry {
-            // Search cache for index, return if present
-            for (ch.entries) |*ent| {
-                if (ent.header.idx == idx) {
-                    assert(ent.header.valid);
+            if (ptr) |p| return p.*;
 
-                    return ent;
+            return null;
+        }
+
+        pub fn getPtr(
+            cache: *Self,
+            id: u64,
+        ) ?*T {
+            assert(id != SquashFs.invalid_block);
+
+            for (cache.entry_idxs, 0..) |i, idx| {
+                if (i == id) {
+                    return &cache.entries[idx];
                 }
             }
 
-            // Move to the next entry, invalidate what was there
-            // so we can put something else there
-            const entry = &ch.entries[ch.next];
-            if (entry.header.valid) {
-                entry.header.valid = false;
-            }
+            return null;
+        }
 
-            entry.header.idx = @intCast(idx);
+        pub fn put(
+            cache: *Self,
+            id: u64,
+            item: T,
+        ) void {
+            const entry = &cache.entries[cache.pos];
+            entry.* = item;
 
-            ch.next += 1;
-            ch.next %= ch.count;
+            cache.entry_idxs[cache.pos] = id;
 
-            return entry;
+            cache.pos += 1;
+            cache.pos %= cache.count;
         }
     };
 }
@@ -174,7 +169,6 @@ pub const BlockIdx = struct {
     pub fn blockList(
         sqfs: *SquashFs,
         inode: *SquashFs.Inode,
-        //bl: *SquashFs.File.BlockList,
         start: u64,
     ) !SquashFs.File.BlockList {
         var blockidx: []const BlockIdx.Entry = undefined;
@@ -200,17 +194,16 @@ pub const BlockIdx = struct {
 
         idx = inode.internal.base.inode_number + 1;
 
-        const bp = sqfs.blockidx.get(idx);
+        const bp = sqfs.blockidx.getPtr(idx);
 
-        if (sqfs.blockidx.entries[idx].header.valid) {
-            blockidx = &[_]BlockIdx.Entry{bp.entry.*};
+        if (bp == null) {
+            blockidx = &[_]BlockIdx.Entry{bp.?.*.*};
         } else {
             blockidx = try addBlockIdx(
                 sqfs,
                 inode,
                 @ptrCast(bp),
             );
-            sqfs.blockidx.entries[idx].header.valid = true;
         }
 
         const skipped = (metablock * SquashFs.metadata_block_size / 4) - (bl.cur.offset / 4);

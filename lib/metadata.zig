@@ -11,8 +11,6 @@ const Stat = std.os.linux.Stat;
 
 pub const build_options = @import("build_options");
 
-const Cache = @import("Cache.zig").Cache;
-const BlockIdx = @import("Cache.zig").BlockIdx;
 const Table = @import("table.zig").Table;
 
 const squashfuse = @import("root.zig");
