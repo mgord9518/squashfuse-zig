@@ -14,7 +14,7 @@ pub fn Table(T: type) type {
         pub fn init(
             allocator: std.mem.Allocator,
             sqfs: *SquashFs,
-            start: usize,
+            start: u64,
             count: usize,
         ) !Self {
             const block_count = try std.math.divCeil(

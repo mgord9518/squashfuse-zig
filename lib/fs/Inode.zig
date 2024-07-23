@@ -103,19 +103,19 @@ pub const ReadError = std.fs.File.ReadError;
 pub fn read(self: *Inode, buf: []u8) ReadError!usize {
     const buf_len = try self.pread(
         buf,
-        @truncate(self.pos),
+        self.pos,
     );
 
     self.pos += buf_len;
 
-    return @truncate(buf_len);
+    return buf_len;
 }
 
 pub const PReadError = ReadError;
 pub fn pread(
     inode: *SquashFs.Inode,
     buf: []u8,
-    offset: usize,
+    offset: u64,
 ) PReadError!usize {
     if (inode.kind == .directory) return error.IsDir;
 
@@ -138,7 +138,7 @@ pub fn pread(
         inode,
     ) catch return error.InputOutput;
 
-    var read_off = offset % block_size;
+    var read_off: usize = @intCast(offset % block_size);
 
     while (nbuf.len > 0) {
         var block: ?SquashFs.Block = null;
@@ -179,10 +179,10 @@ pub fn pread(
         take = data_size - read_off;
         if (take > nbuf.len) take = nbuf.len;
 
-        if (block != null) {
+        if (block) |b| {
             @memcpy(
                 nbuf[0..take],
-                block.?.data[data_off + read_off ..][0..take],
+                b.data[data_off + read_off ..][0..take],
             );
         } else {
             @memset(nbuf[0..take], 0);
