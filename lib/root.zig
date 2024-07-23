@@ -1,8 +1,8 @@
 const std = @import("std");
-const io = std.io;
-const os = std.os;
 const posix = std.posix;
 const fs = std.fs;
+
+const metadata = @import("metadata.zig");
 
 // TODO: is this always correct?
 const S = std.os.linux.S;
@@ -36,16 +36,14 @@ pub const SquashFs = struct {
     export_table: ?Table(u64),
     xattr_table: Table(XattrId),
 
-    md_cache: Cache(Block),
-    data_cache: Cache(Block),
-    frag_cache: Cache(Block),
+    md_cache: Cache(metadata.Block),
+    data_cache: Cache([]u8),
+    frag_cache: Cache([]u8),
 
     inode_map: ?std.StringHashMap(Inode.TableEntry) = null,
 
     xattr_info: XattrIdTable,
     //compression_options: Compression.Options,
-
-    offset: u64,
 
     opts: SquashFs.Options,
 
@@ -97,14 +95,12 @@ pub const SquashFs = struct {
                 .md_cache = undefined,
                 .data_cache = undefined,
                 .frag_cache = undefined,
-                .offset = undefined,
             };
         }
 
         sqfs.opts = opts;
         sqfs.allocator = allocator;
         sqfs.file = try fs.cwd().openFile(path, .{});
-        sqfs.offset = opts.offset;
 
         try sqfs.load(&sqfs.super_block, opts.offset);
 
@@ -141,7 +137,7 @@ pub const SquashFs = struct {
         }
 
         sqfs.md_cache = try Cache(
-            Block,
+            metadata.Block,
         ).init(
             sqfs.allocator,
             sqfs.opts.cached_metadata_blocks,
@@ -149,7 +145,7 @@ pub const SquashFs = struct {
         );
 
         sqfs.data_cache = try Cache(
-            Block,
+            []u8,
         ).init(
             sqfs.allocator,
             sqfs.opts.cached_data_blocks,
@@ -157,7 +153,7 @@ pub const SquashFs = struct {
         );
 
         sqfs.frag_cache = try Cache(
-            Block,
+            []u8,
         ).init(
             sqfs.allocator,
             sqfs.opts.cached_fragment_blocks,
@@ -255,13 +251,13 @@ pub const SquashFs = struct {
             .base = std.mem.zeroes(SquashFs.SuperBlock.InodeBase),
             .nlink = 0,
             .xattr = 0,
-            .next = std.mem.zeroes(SquashFs.MetadataCursor),
+            .next = std.mem.zeroes(metadata.Cursor),
             .xtra = undefined,
         };
 
         inode.xattr = SquashFs.invalid_xattr;
 
-        var cur = MetadataCursor{
+        var cur = metadata.Cursor{
             .sqfs = sqfs,
             .block = id.block + sqfs.super_block.inode_table_start,
             .offset = id.offset,
@@ -428,71 +424,63 @@ pub const SquashFs = struct {
 
     pub fn dataCache(
         sqfs: *SquashFs,
-        cache: *Cache(Block),
+        cache: *Cache([]u8),
         pos: u64,
         header: Block.DataEntry,
-    ) !Block {
+    ) ![]u8 {
         const allocator = sqfs.allocator;
 
-        const cache_current = cache.pos;
-        const block_size = sqfs.super_block.block_size;
-        const idx = cache_current * block_size;
+        var out_buf = cache.getDataBuf().?;
+        const scratch_buf = cache.getCompressedDataBuf().?;
 
-        var buf = cache.data.?[idx..][0..block_size];
-        const compressed_data_buf = cache.compressed_data.?[idx..][0..block_size];
-
-        const block = cache.get(pos) orelse blk: {
-            const b = try blockReadIntoBuf(
+        return cache.get(pos) orelse blk: {
+            const block_data = try blockReadIntoBuf(
                 allocator,
                 sqfs,
                 pos,
                 !header.is_uncompressed,
                 header.size,
-                &buf,
-                compressed_data_buf,
+                &out_buf,
+                scratch_buf,
             );
 
-            cache.put(pos, b);
+            cache.put(pos, block_data);
 
-            break :blk b;
+            break :blk block_data;
         };
-
-        return block;
     }
 
     pub fn mdCache(
         sqfs: *SquashFs,
         pos: *u64,
-    ) !Block {
-        const cache_current = sqfs.md_cache.pos;
-        const block_size = SquashFs.metadata_block_size;
+    ) !metadata.Block {
+        var out_buf = sqfs.md_cache.getDataBuf().?;
+        const scratch_buf = sqfs.md_cache.getCompressedDataBuf().?;
 
-        const idx = cache_current * block_size;
-
-        var buf: []u8 = sqfs.md_cache.data.?[idx..][0..block_size];
-        const compressed_metadata_buf = sqfs.md_cache.compressed_data.?[idx..][0..block_size];
-
-        const block = sqfs.md_cache.get(pos.*) orelse blk: {
+        const block: metadata.Block = sqfs.md_cache.get(pos.*) orelse blk: {
             var header: Block.MetadataEntry = undefined;
 
             try sqfs.load(
                 &header,
-                pos.* + sqfs.offset,
+                pos.* + sqfs.opts.offset,
             );
 
             header = littleToNative(header);
 
-            var b = try blockReadIntoBuf(
+            const block_data = try blockReadIntoBuf(
                 sqfs.md_cache.allocator,
                 sqfs,
                 pos.* + @sizeOf(Block.MetadataEntry),
                 !header.is_uncompressed,
                 header.size,
-                &buf,
-                compressed_metadata_buf,
+                &out_buf,
+                scratch_buf,
             );
 
-            b.data_size = header.size + @sizeOf(Block.MetadataEntry);
+            const b = metadata.Block{
+                .data_size = header.size + @sizeOf(Block.MetadataEntry),
+                .data = block_data,
+            };
 
             sqfs.md_cache.put(pos.*, b);
 
@@ -507,11 +495,11 @@ pub const SquashFs = struct {
     pub const Inode = @import("fs/Inode.zig");
     pub const File = @import("fs/File.zig");
     pub const Dir = @import("fs/Dir.zig");
-    pub const MetadataCursor = @import("metadata.zig").MetadataCursor;
+    pub const MetadataCursor = metadata.Cursor;
 
     pub fn mdSkip(
         sqfs: *SquashFs,
-        cur: *SquashFs.MetadataCursor,
+        cur: *metadata.Cursor,
         skip: usize,
     ) !void {
         var pos = cur.block;
@@ -621,34 +609,32 @@ fn blockReadIntoBuf(
     // Scratch buffer, this is filled with the compressed data, may be freed
     // after use
     scratch_buf: []u8,
-) !SquashFs.Block {
-    var block = SquashFs.Block{
-        .data = data.*,
-    };
+) ![]u8 {
+    var block_data = data.*;
 
     if (compressed) {
         try sqfs.load(
             scratch_buf[0..size],
-            pos + sqfs.offset,
+            pos + sqfs.opts.offset,
         );
 
         const written = try sqfs.decompressFn(
             allocator,
             scratch_buf[0..size],
-            block.data,
+            block_data,
         );
 
-        block.data = block.data[0..written];
-    } else {
-        block.data.len = size;
-
-        try sqfs.load(
-            block.data,
-            pos + sqfs.offset,
-        );
+        return block_data[0..written];
     }
 
-    return block;
+    block_data = block_data[0..size];
+
+    try sqfs.load(
+        block_data,
+        pos + sqfs.opts.offset,
+    );
+
+    return block_data;
 }
 
 pub fn littleToNative(x: anytype) @TypeOf(x) {

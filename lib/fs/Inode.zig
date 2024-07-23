@@ -45,11 +45,10 @@ pub const Internal = extern struct {
 
 fn fragBlock(
     inode: *Inode,
-    offset: *usize,
-    size: *usize,
-) !SquashFs.Block {
+    offset: *u64,
+    size: *u64,
+) ![]u8 {
     var sqfs = inode.parent;
-    var block: SquashFs.Block = undefined;
 
     if (inode.kind != .file) return error.Error;
 
@@ -59,16 +58,16 @@ fn fragBlock(
         inode.internal.xtra.reg.frag_idx,
     );
 
-    block = try sqfs.dataCache(
+    const block_data = try sqfs.dataCache(
         &sqfs.frag_cache,
         frag.start_block,
         frag.block_header,
     );
 
     offset.* = inode.internal.xtra.reg.frag_off;
-    size.* = @intCast(inode.internal.xtra.reg.size % sqfs.super_block.block_size);
+    size.* = inode.internal.xtra.reg.size % sqfs.super_block.block_size;
 
-    return block;
+    return block_data;
 }
 
 /// Reads the link target into `buf`
@@ -125,12 +124,9 @@ pub fn pread(
     const file_size = inode.internal.xtra.reg.size;
     const block_size = sqfs.super_block.block_size;
 
-    if (nbuf.len < 0 or offset > file_size) return error.InputOutput;
+    if (offset > file_size) return error.InputOutput;
 
-    if (offset == file_size) {
-        nbuf.len = 0;
-        return 0;
-    }
+    if (offset == file_size) return 0;
 
     // TODO: investigate performance on large files
     var block_list = SquashFs.File.BlockList.init(
@@ -141,16 +137,16 @@ pub fn pread(
     var read_off: usize = @intCast(offset % block_size);
 
     while (nbuf.len > 0) {
-        var block: ?SquashFs.Block = null;
-        var data_off: usize = 0;
-        var data_size: usize = 0;
+        var block_data: ?[]u8 = null;
+        var data_off: u64 = 0;
+        var data_size: u64 = 0;
         var take: usize = 0;
 
         const fragment = block_list.remain == 0;
         if (fragment) {
             if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
 
-            block = inode.fragBlock(
+            block_data = inode.fragBlock(
                 &data_off,
                 &data_size,
             ) catch return error.SystemResources;
@@ -166,23 +162,23 @@ pub fn pread(
 
                 if (data_size > block_size) data_size = block_size;
             } else {
-                block = sqfs.dataCache(
+                block_data = sqfs.dataCache(
                     &sqfs.data_cache,
                     block_list.block,
                     block_list.header,
                 ) catch return error.SystemResources;
 
-                data_size = block.?.data.len;
+                data_size = block_data.?.len;
             }
         }
 
-        take = data_size - read_off;
+        take = @intCast(data_size - read_off);
         if (take > nbuf.len) take = nbuf.len;
 
-        if (block) |b| {
+        if (block_data) |b| {
             @memcpy(
                 nbuf[0..take],
-                b.data[data_off + read_off ..][0..take],
+                b[@intCast(data_off + read_off)..][0..take],
             );
         } else {
             @memset(nbuf[0..take], 0);

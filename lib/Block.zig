@@ -1,8 +1,7 @@
+// TODO: move this stuff
+
 pub const Block = @This();
 const std = @import("std");
-
-data: []u8,
-data_size: usize = 0,
 
 /// Describes a SquashFS fragment block
 /// <https://dr-emann.github.io/squashfs/#datablocks-and-fragments>

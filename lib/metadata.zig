@@ -1,27 +1,18 @@
 const std = @import("std");
-const io = std.io;
-const os = std.os;
-const posix = std.posix;
-const fs = std.fs;
-
-// TODO: is this always correct?
-const S = std.os.linux.S;
-
-const Stat = std.os.linux.Stat;
-
-pub const build_options = @import("build_options");
-
-const Table = @import("table.zig").Table;
 
 const squashfuse = @import("root.zig");
 const SquashFs = squashfuse.SquashFs;
 
-pub const MetadataCursor = extern struct {
+pub const Block = struct {
+    data: []u8,
+    data_size: usize = 0,
+};
+
+pub const Cursor = extern struct {
     sqfs: *SquashFs,
     block: u64,
     offset: usize,
 
-    /// Reads
     pub fn load(
         cur: *SquashFs.MetadataCursor,
         pointer: anytype,

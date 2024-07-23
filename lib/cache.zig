@@ -89,10 +89,30 @@ pub fn Cache(T: type) type {
         ) ?*T {
             assert(id != SquashFs.invalid_block);
 
-            for (cache.entry_idxs, 0..) |i, idx| {
-                if (i == id) {
-                    return &cache.entries[idx];
-                }
+            if (std.mem.indexOfScalar(u64, cache.entry_idxs, id)) |idx| {
+                return &cache.entries[idx];
+            }
+
+            return null;
+        }
+
+        pub fn getDataBuf(cache: *Self) ?[]u8 {
+            if (cache.data) |data| {
+                const block_size = data.len / cache.count;
+                const idx = cache.pos * block_size;
+
+                return data[idx..][0..block_size];
+            }
+
+            return null;
+        }
+
+        pub fn getCompressedDataBuf(cache: *Self) ?[]u8 {
+            if (cache.compressed_data) |compressed_data| {
+                const block_size = compressed_data.len / cache.count;
+                const idx = cache.pos * block_size;
+
+                return compressed_data[idx..][0..block_size];
             }
 
             return null;
@@ -103,9 +123,7 @@ pub fn Cache(T: type) type {
             id: u64,
             item: T,
         ) void {
-            const entry = &cache.entries[cache.pos];
-            entry.* = item;
-
+            cache.entries[cache.pos] = item;
             cache.entry_idxs[cache.pos] = id;
 
             cache.pos += 1;
