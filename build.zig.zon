@@ -1,6 +1,6 @@
 .{
     .name = "squashfuse-zig",
-    .version = "0.2.2",
+    .version = "0.2.3",
 
     .paths = [][]const u8{
         "build.zig",
@@ -21,16 +21,16 @@
             .hash = "12205592f7dc4b4c7256abd657a50bd9784459a0e9b8bfe8b0d1bbcc153a6d0f650a",
         },
         .libdeflate = .{
-            .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz",
-            .hash = "12209f6d3313777edb090add7dcb02c2ee7c10b65c62b9c401ce90148c0f44387d99",
+            .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.20.tar.gz",
+            .hash = "12201d5291e67cbc0b674f8ea5a5ed0684c06b03372165335d5b64c95c0c0a5cdba2",
         },
         .libzstd = .{
-            .url = "https://github.com/facebook/zstd/archive/refs/tags/v1.5.5.tar.gz",
-            .hash = "122080def5adee28587f8aaa31f0f33133897c9ed88f4ecda1c9eef649d29df5c568",
+            .url = "https://github.com/facebook/zstd/archive/refs/tags/v1.5.6.tar.gz",
+            .hash = "1220cc97075e331a87cb201c03a018a1522325d6aa844619a461462fbfdaedb38c42",
         },
         .liblz4 = .{
-            .url = "https://github.com/lz4/lz4/archive/refs/tags/v1.9.4.tar.gz",
-            .hash = "1220a9e5107eca3349d0574dc01d6c270884052bbaf397d54b8458f22d57aaef9979",
+            .url = "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz",
+            .hash = "1220fa6e67d18c0aef6009ec2fc0d8c5b5e2371544fc1e874695311739ccd8f8b0d3",
         },
         .libxz = .{
             .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.6.2.tar.gz",

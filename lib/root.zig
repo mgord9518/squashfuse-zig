@@ -13,7 +13,6 @@ pub const compression = @import("compression.zig");
 pub const build_options = @import("build_options");
 
 const Cache = @import("cache.zig").Cache;
-const BlockIdx = @import("cache.zig").BlockIdx;
 const Table = @import("table.zig").Table;
 
 pub const SquashFsError = error{
@@ -36,9 +35,6 @@ pub const SquashFs = struct {
     frag_table: Table(Block.FragmentEntry),
     export_table: ?Table(u64),
     xattr_table: Table(XattrId),
-
-    //blockidx: *Cache(BlockCacheEntry),
-    blockidx: Cache(*BlockIdx.Entry),
 
     md_cache: Cache(Block),
     data_cache: Cache(Block),
@@ -101,7 +97,6 @@ pub const SquashFs = struct {
                 .md_cache = undefined,
                 .data_cache = undefined,
                 .frag_cache = undefined,
-                .blockidx = undefined,
                 .offset = undefined,
             };
         }
@@ -169,14 +164,6 @@ pub const SquashFs = struct {
             .{ .block_size = sqfs.super_block.block_size },
         );
 
-        sqfs.blockidx = try Cache(
-            *BlockIdx.Entry,
-        ).init(
-            sqfs.allocator,
-            sqfs.opts.cached_fragment_blocks,
-            .{},
-        );
-
         sqfs.id_table = try Table(u32).init(
             allocator,
             sqfs,
@@ -231,8 +218,6 @@ pub const SquashFs = struct {
         sqfs.md_cache.deinit();
         sqfs.data_cache.deinit();
         sqfs.frag_cache.deinit();
-
-        sqfs.blockidx.deinit();
 
         sqfs.file.close();
 

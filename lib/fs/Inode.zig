@@ -14,7 +14,6 @@ pub const build_options = @import("build_options");
 const squashfuse = @import("../root.zig");
 const SquashFs = squashfuse.SquashFs;
 const SuperBlock = SquashFs.SuperBlock;
-const BlockIdx = @import("../cache.zig").BlockIdx;
 
 const Inode = @This();
 
@@ -133,11 +132,11 @@ pub fn pread(
         return 0;
     }
 
-    var bl = BlockIdx.blockList(
+    // TODO: investigate performance on large files
+    var block_list = SquashFs.File.BlockList.init(
         sqfs,
         inode,
-        offset,
-    ) catch return error.SystemResources;
+    ) catch return error.InputOutput;
 
     var read_off = offset % block_size;
 
@@ -147,7 +146,7 @@ pub fn pread(
         var data_size: usize = 0;
         var take: usize = 0;
 
-        const fragment = bl.remain == 0;
+        const fragment = block_list.remain == 0;
         if (fragment) {
             if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
 
@@ -157,20 +156,20 @@ pub fn pread(
             ) catch return error.SystemResources;
         } else {
             // TODO
-            bl.next() catch return error.SystemResources;
+            block_list.next() catch return error.SystemResources;
 
-            if (bl.pos + block_size <= offset) continue;
+            if (block_list.pos + block_size <= offset) continue;
 
             data_off = 0;
-            if (bl.input_size == 0) {
-                data_size = @intCast(file_size - bl.pos);
+            if (block_list.input_size == 0) {
+                data_size = @intCast(file_size - block_list.pos);
 
                 if (data_size > block_size) data_size = block_size;
             } else {
                 block = sqfs.dataCache(
                     &sqfs.data_cache,
-                    bl.block,
-                    bl.header,
+                    block_list.block,
+                    block_list.header,
                 ) catch return error.SystemResources;
 
                 data_size = block.?.data.len;

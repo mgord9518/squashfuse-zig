@@ -1,6 +1,4 @@
 const std = @import("std");
-const io = std.io;
-//const fs = std.fs;
 
 const squashfuse = @import("../root.zig");
 const SquashFs = squashfuse.SquashFs;
