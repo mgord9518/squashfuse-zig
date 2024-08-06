@@ -239,7 +239,7 @@ pub fn build(b: *std.Build) !void {
                     // The block size should be automatically tested at different
                     // sizes in the future
                     "-b",
-                    "1M",
+                    "8192",
                     "-p",
                     "/ d 644 0 0",
                     "-p",

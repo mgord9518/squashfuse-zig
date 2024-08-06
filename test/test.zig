@@ -32,6 +32,41 @@ test "Dir.openDir" {
     }
 }
 
+test "Dir.walk" {
+    inline for (compression_algos) |algo| {
+        const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
+
+        var sqfs = try SquashFs.init(allocator, file_path, .{});
+        defer sqfs.deinit();
+
+        var root = sqfs.root();
+
+        var walker = try root.walk(allocator);
+        defer walker.deinit();
+
+        var idx: usize = 0;
+        while (try walker.next()) |entry| : (idx += 1) {
+            //            std.debug.print("a {d} {x}\n", .{
+            //                entry.path.len,
+            //                entry.path,
+            //            });
+            //            std.log.log("b {d} {x}\n", .{
+            //                file_tree[idx].len,
+            //                file_tree[idx],
+            //            });
+
+            try expect(std.mem.eql(
+                u8,
+                entry.path,
+                file_tree[idx],
+            ));
+        }
+
+        // Make sure the entire list has been hit
+        try expect(idx == file_tree.len);
+    }
+}
+
 test "SquashFs.Inode.walk" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
@@ -105,7 +140,7 @@ test "devices" {
                 entry.name,
                 "block_device",
             )) {
-                const dev = inode.internal.xtra.dev;
+                const dev = inode.xtra.dev;
 
                 try expect(dev.major() == 69);
                 try expect(dev.minor() == 2);
@@ -116,7 +151,7 @@ test "devices" {
                 entry.name,
                 "character_device",
             )) {
-                const dev = inode.internal.xtra.dev;
+                const dev = inode.xtra.dev;
 
                 try expect(dev.major() == 0);
                 try expect(dev.minor() == 1);

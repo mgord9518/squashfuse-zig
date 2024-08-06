@@ -8,13 +8,31 @@ pub const Block = struct {
     data_size: usize = 0,
 };
 
+pub const Table = enum {
+    inode_table,
+    directory_table,
+};
+
 pub const Cursor = extern struct {
     sqfs: *SquashFs,
     block: u64,
     offset: usize,
 
+    pub fn init(sqfs: *SquashFs, table: Table, id: anytype) Cursor {
+        const start = switch (table) {
+            .inode_table => sqfs.super_block.inode_table_start,
+            .directory_table => sqfs.super_block.directory_table_start,
+        };
+
+        return .{
+            .sqfs = sqfs,
+            .block = start + id.block,
+            .offset = id.offset,
+        };
+    }
+
     pub fn load(
-        cur: *SquashFs.MetadataCursor,
+        cur: *Cursor,
         pointer: anytype,
     ) !void {
         const T = @TypeOf(pointer);
@@ -34,43 +52,89 @@ pub const Cursor = extern struct {
                     break :blk @ptrCast(pointer);
                 };
 
-                try cur.read(item_u8[0..size]);
+                _ = try cur.reader().readAll(item_u8[0..size]);
             },
             else => unreachable,
         }
     }
 
+    pub const ReadError = std.fs.File.ReadError ||
+        squashfuse.compression.DecompressError ||
+        error{Unseekable};
+
+    pub const Reader = std.io.Reader(
+        *Cursor,
+        ReadError,
+        read,
+    );
+
+    pub fn reader(self: *Cursor) Reader {
+        return .{ .context = self };
+    }
+
     pub fn read(
-        cur: *SquashFs.MetadataCursor,
+        cur: *Cursor,
         buf: []u8,
-    ) !void {
-        var pos = cur.block;
+    ) ReadError!usize {
+        var block_offset = cur.block;
 
-        var size = buf.len;
-        var nbuf = buf;
+        var block = try cur.sqfs.mdCache(&block_offset);
 
-        while (size > 0) {
-            const block = try cur.sqfs.mdCache(&pos);
+        const take = @min(
+            block.data[cur.offset..].len,
+            buf.len,
+        );
 
+        @memcpy(
+            buf[0..take],
+            block.data[cur.offset..][0..take],
+        );
+
+        cur.offset += take;
+
+        // Move to next block
+        if (cur.offset == block.data.len) {
+            cur.block = block_offset;
+            cur.offset = 0;
+
+            block = try cur.sqfs.mdCache(&block_offset);
+        }
+
+        return take;
+    }
+
+    pub fn readOld(
+        cur: *Cursor,
+        buf: []u8,
+    ) ReadError!usize {
+        var block_offset = cur.block;
+        var idx: usize = 0;
+
+        var block = try cur.sqfs.mdCache(&block_offset);
+
+        while (idx < buf.len) {
             const take = @min(
-                block.data.len - cur.offset,
-                size,
+                block.data[cur.offset..].len,
+                buf[idx..].len,
             );
 
             @memcpy(
-                nbuf[0..take],
+                buf[idx..][0..take],
                 block.data[cur.offset..][0..take],
             );
 
-            nbuf = nbuf[take..];
-
-            size -= take;
+            idx += take;
             cur.offset += take;
 
+            // Move to next block
             if (cur.offset == block.data.len) {
-                cur.block = pos;
+                cur.block = block_offset;
                 cur.offset = 0;
+
+                block = try cur.sqfs.mdCache(&block_offset);
             }
         }
+
+        return buf.len;
     }
 };

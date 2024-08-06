@@ -12,35 +12,32 @@ const Stat = std.os.linux.Stat;
 pub const build_options = @import("build_options");
 
 const squashfuse = @import("../root.zig");
+const metadata = squashfuse.metadata;
 const SquashFs = squashfuse.SquashFs;
 const SuperBlock = SquashFs.SuperBlock;
 
 const Inode = @This();
 
-internal: Inode.Internal,
 parent: *SquashFs,
 kind: SquashFs.File.Kind,
 pos: u64 = 0,
+
+base: SquashFs.SuperBlock.InodeBase,
+xattr: u32,
+next: metadata.Cursor,
+
+xtra: union(enum) {
+    reg: SuperBlock.LFileInode,
+    dev: SuperBlock.LDevInode,
+    symlink: SuperBlock.SymLinkInode,
+    dir: SuperBlock.LDirInode,
+    nlink: u32,
+},
 
 pub const TableEntry = packed struct(u64) {
     offset: u16,
     block: u32,
     _: u16 = 0,
-};
-
-// TODO: move this into parent inode
-pub const Internal = extern struct {
-    base: SquashFs.SuperBlock.InodeBase,
-    nlink: u32,
-    xattr: u32,
-    next: SquashFs.MetadataCursor,
-
-    xtra: extern union {
-        reg: SuperBlock.LFileInode,
-        dev: SuperBlock.LDevInode,
-        symlink: SuperBlock.SymLinkInode,
-        dir: SuperBlock.LDirInode,
-    },
 };
 
 fn fragBlock(
@@ -52,10 +49,10 @@ fn fragBlock(
 
     if (inode.kind != .file) return error.Error;
 
-    if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) return error.Error;
+    if (inode.xtra.reg.frag_idx == SquashFs.invalid_frag) return error.Error;
 
     const frag = try sqfs.frag_table.get(
-        inode.internal.xtra.reg.frag_idx,
+        inode.xtra.reg.frag_idx,
     );
 
     const block_data = try sqfs.dataCache(
@@ -64,8 +61,8 @@ fn fragBlock(
         frag.block_header,
     );
 
-    offset.* = inode.internal.xtra.reg.frag_off;
-    size.* = inode.internal.xtra.reg.size % sqfs.super_block.block_size;
+    offset.* = inode.xtra.reg.frag_off;
+    size.* = inode.xtra.reg.size % sqfs.super_block.block_size;
 
     return block_data;
 }
@@ -77,15 +74,15 @@ pub fn readLink(inode: *Inode, buf: []u8) ![]const u8 {
         return error.NotLink;
     }
 
-    const len = inode.internal.xtra.symlink.size;
+    const len = inode.xtra.symlink.size;
 
     if (len > buf.len) {
         return error.NoSpaceLeft;
     }
 
-    var cur = inode.internal.next;
+    var cur = inode.next;
 
-    try cur.read(buf[0..len]);
+    _ = try cur.read(buf[0..len]);
 
     return buf[0..len];
 }
@@ -121,7 +118,7 @@ pub fn pread(
     var nbuf = buf;
     var sqfs = inode.parent;
 
-    const file_size = inode.internal.xtra.reg.size;
+    const file_size = inode.xtra.reg.size;
     const block_size = sqfs.super_block.block_size;
 
     if (offset > file_size) return error.InputOutput;
@@ -144,7 +141,7 @@ pub fn pread(
 
         const fragment = block_list.remain == 0;
         if (fragment) {
-            if (inode.internal.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
+            if (inode.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
 
             block_data = inode.fragBlock(
                 &data_off,
@@ -237,7 +234,7 @@ pub fn getPos(self: *const Inode) GetSeekPosError!u64 {
 }
 
 pub fn getEndPos(self: *const Inode) GetSeekPosError!u64 {
-    return self.internal.xtra.reg.size;
+    return self.xtra.reg.size;
 }
 
 pub const Reader = io.Reader(Inode, os.ReadError, read);
@@ -256,20 +253,33 @@ fn getId(sqfs: *SquashFs, idx: u16) !u32 {
 }
 
 pub fn stat(inode: *Inode) !fs.File.Stat {
-    const mtime = @as(i128, inode.internal.base.mtime) * std.time.ns_per_s;
+    const mtime = @as(i128, inode.base.mtime) * std.time.ns_per_s;
+
+    // zig fmt: off
+    const mode = inode.base.mode | @as(std.posix.mode_t, switch (inode.kind) {
+        .file         => S.IFREG,
+        .directory    => S.IFDIR,
+        .sym_link     => S.IFLNK,
+        .named_pipe   => S.IFIFO,
+        .block_device => S.IFBLK,
+        .character_device   => S.IFCHR,
+        .unix_domain_socket => S.IFSOCK,
+        else => 0,
+    });
+    // zig fmt: on
 
     return .{
         // TODO
         .inode = 0,
         .size = switch (inode.kind) {
-            .file => inode.internal.xtra.reg.size,
-            .sym_link => inode.internal.xtra.symlink.size,
-            .directory => inode.internal.xtra.dir.size,
+            .file => inode.xtra.reg.size,
+            .sym_link => inode.xtra.symlink.size,
+            .directory => inode.xtra.dir.size,
             else => 0,
         },
 
         // Only exists on posix platforms
-        .mode = if (fs.File.Mode == u0) 0 else inode.internal.base.mode,
+        .mode = if (fs.File.Mode == u0) 0 else mode,
 
         .kind = switch (inode.kind) {
             .block_device => .block_device,
@@ -279,6 +289,8 @@ pub fn stat(inode: *Inode) !fs.File.Stat {
             .sym_link => .sym_link,
             .file => .file,
             .unix_domain_socket => .unix_domain_socket,
+
+            else => .unknown,
         },
 
         .atime = mtime,
@@ -291,31 +303,51 @@ pub fn stat(inode: *Inode) !fs.File.Stat {
 pub fn statC(inode: *Inode) !Stat {
     var st = std.mem.zeroes(Stat);
 
-    st.mode = inode.internal.base.mode;
-    st.nlink = @intCast(inode.internal.nlink);
+    // zig fmt: off
+    st.mode = inode.base.mode | @as(u32, switch (inode.kind) {
+        .file         => S.IFREG,
+        .directory    => S.IFDIR,
+        .sym_link     => S.IFLNK,
+        .named_pipe   => S.IFIFO,
+        .block_device => S.IFBLK,
+        .character_device   => S.IFCHR,
+        .unix_domain_socket => S.IFSOCK,
+        else => 0,
+    });
+    // zig fmt: on
 
-    st.atim.tv_sec = @intCast(inode.internal.base.mtime);
-    st.ctim.tv_sec = @intCast(inode.internal.base.mtime);
-    st.mtim.tv_sec = @intCast(inode.internal.base.mtime);
+    //st.nlink = @intCast(inode.nlink);
+    st.nlink = switch (inode.xtra) {
+        .reg => |reg| reg.nlink,
+        .dir => |dir| dir.nlink,
+        .dev => |dev| dev.nlink,
+        .nlink => |nlink| nlink,
+
+        else => 1,
+    };
+
+    st.atim.tv_sec = @intCast(inode.base.mtime);
+    st.ctim.tv_sec = @intCast(inode.base.mtime);
+    st.mtim.tv_sec = @intCast(inode.base.mtime);
 
     switch (inode.kind) {
         .file => {
-            st.size = @intCast(inode.internal.xtra.reg.size);
+            st.size = @intCast(inode.xtra.reg.size);
             st.blocks = @divTrunc(st.size, 512);
         },
         .block_device, .character_device => {
-            st.rdev = @as(u32, @bitCast(inode.internal.xtra.dev.dev));
+            st.rdev = @as(u32, @bitCast(inode.xtra.dev.dev));
         },
         .sym_link => {
-            st.size = @intCast(inode.internal.xtra.symlink.size);
+            st.size = @intCast(inode.xtra.symlink.size);
         },
         else => {},
     }
 
     st.blksize = @intCast(inode.parent.super_block.block_size);
 
-    st.uid = try getId(inode.parent, inode.internal.base.uid);
-    st.gid = try getId(inode.parent, inode.internal.base.guid);
+    st.uid = try getId(inode.parent, inode.base.uid);
+    st.gid = try getId(inode.parent, inode.base.guid);
 
     return st;
 }
@@ -372,7 +404,7 @@ pub const Iterator = struct {
         self.name_buf[sqfs_dir_entry.name.len] = '\x00';
 
         return .{
-            .id = sqfs_dir_entry.inode,
+            .id = sqfs_dir_entry.inode_id,
             .name = self.name_buf[0..sqfs_dir_entry.name.len :0],
             .kind = sqfs_dir_entry.kind,
             .parent = self.parent,
@@ -493,7 +525,7 @@ pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
             defer f.close();
 
             var off: usize = 0;
-            const fsize: u64 = self.internal.xtra.reg.size;
+            const fsize: u64 = self.xtra.reg.size;
 
             while (off < fsize) {
                 const read_bytes = try self.read(buf);
@@ -538,7 +570,7 @@ pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
         },
 
         .block_device, .character_device => {
-            const dev = self.internal.xtra.dev;
+            const dev = self.xtra.dev;
 
             var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
             const path = try std.fmt.bufPrintZ(&path_buf, "{s}", .{dest});

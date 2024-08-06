@@ -22,6 +22,7 @@ pub fn getEntryColor(entry: SquashFs.Inode.Walker.Entry, colors: []const u8, col
         .unix_domain_socket => "so",
         .block_device => "bd",
         .character_device => "cd",
+        else => reset,
     }) orelse reset;
 
     var name_buf: [4096]u8 = undefined;

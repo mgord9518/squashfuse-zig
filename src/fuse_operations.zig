@@ -35,7 +35,7 @@ pub const FuseOperations = struct {
         if (std.mem.eql(u8, path, "/")) {
             var inode = squash.image.getRootInode();
 
-            fi.handle = @intFromPtr(&inode.internal);
+            fi.handle = @intFromPtr(&inode);
 
             return;
         }
@@ -45,7 +45,7 @@ pub const FuseOperations = struct {
 
         if (entry.kind != .directory) return fuse.MountError.NotDir;
 
-        fi.handle = @intFromPtr(&inode.internal);
+        fi.handle = @intFromPtr(&inode);
     }
 
     pub fn release(_: [:0]const u8, fi: *fuse.FileInfo) fuse.MountError!void {
@@ -117,7 +117,7 @@ pub const FuseOperations = struct {
             return fuse.MountError.IsDir;
         }
 
-        fi.handle = @intFromPtr(&entry.inode().internal);
+        fi.handle = @intFromPtr(&entry.inode());
         fi.keep_cache = true;
     }
 

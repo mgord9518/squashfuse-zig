@@ -307,8 +307,6 @@ pub fn main() !void {
     // TODO: use basename of src if not `/`
     const dest = res.args.@"extract-dest" orelse "squashfs-root";
 
-    var root_inode = FuseOperations.squash.image.getRootInode();
-
     if (res.args.extract != 0) {
         extractArchive(
             allocator,
@@ -334,6 +332,8 @@ pub fn main() !void {
         return;
     }
 
+    var root_inode = FuseOperations.squash.image.getRootInode();
+
     var walker = try root_inode.walk(allocator);
     defer walker.deinit();
 
@@ -352,13 +352,13 @@ pub fn main() !void {
 
             if (res.args.list == 2) {
                 st_buf[0] = switch (entry.kind) {
-                    .file => '-',
                     .directory => 'd',
                     .sym_link => 'l',
                     .named_pipe => 'p',
                     .character_device => 'c',
                     .block_device => 'c',
                     .unix_domain_socket => 's',
+                    else => '-',
                 };
 
                 st_buf[1] = if (st.mode & S.IRUSR != 0) 'r' else '-';
@@ -373,10 +373,19 @@ pub fn main() !void {
                 st_buf[8] = if (st.mode & S.IWOTH != 0) 'w' else '-';
                 st_buf[9] = if (st.mode & S.IXOTH != 0) 'x' else '-';
 
+                const nlink = switch (inode.xtra) {
+                    .reg => |reg| reg.nlink,
+                    .dir => |dir| dir.nlink,
+                    .dev => |dev| dev.nlink,
+                    .nlink => |nlink| nlink,
+
+                    else => 1,
+                };
+
                 try stdout.print("{s}{s} {0s}{d} {d} {d} {s}{s}{0s}\n", .{
                     reset,
                     st_buf[0..10],
-                    inode.internal.nlink,
+                    nlink,
                     st.uid,
                     st.gid,
                     color,

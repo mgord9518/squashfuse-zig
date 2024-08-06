@@ -29,13 +29,9 @@ pub fn Table(T: type) type {
                 .blocks = try allocator.alloc(u64, block_count),
             };
 
-            try sqfs.load(
-                table.blocks,
-                start,
-            );
-
+            try sqfs.file.seekTo(start);
             for (table.blocks) |*block| {
-                block.* = std.mem.littleToNative(u64, block.*);
+                block.* = try sqfs.file.reader().readInt(u64, .little);
             }
 
             return table;
@@ -66,6 +62,7 @@ pub fn Table(T: type) type {
             table: *Self,
         ) void {
             table.allocator.free(table.blocks);
+            table.* = undefined;
         }
     };
 }

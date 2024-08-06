@@ -1,16 +1,13 @@
 const std = @import("std");
 const posix = std.posix;
 const fs = std.fs;
-
-const metadata = @import("metadata.zig");
-
-// TODO: is this always correct?
-const S = std.os.linux.S;
+const assert = std.debug.assert;
 
 const Stat = std.os.linux.Stat;
 
 pub const compression = @import("compression.zig");
 pub const build_options = @import("build_options");
+pub const metadata = @import("metadata.zig");
 
 const Cache = @import("cache.zig").Cache;
 const Table = @import("table.zig").Table;
@@ -79,53 +76,20 @@ pub const SquashFs = struct {
     ) !*SquashFs {
         const sqfs = try allocator.create(SquashFs);
 
-        // TODO: why does it crash (incorrect alignment) without this?
-        if (true) {
-            sqfs.* = SquashFs{
-                .opts = undefined,
-                .allocator = undefined,
-                .file = undefined,
-                .decompressFn = undefined,
-                .super_block = undefined,
-                .id_table = undefined,
-                .frag_table = undefined,
-                .export_table = undefined,
-                .xattr_table = undefined,
-                .xattr_info = undefined,
-                .md_cache = undefined,
-                .data_cache = undefined,
-                .frag_cache = undefined,
-            };
-        }
-
+        sqfs.inode_map = null;
         sqfs.opts = opts;
         sqfs.allocator = allocator;
         sqfs.file = try fs.cwd().openFile(path, .{});
 
-        try sqfs.load(&sqfs.super_block, opts.offset);
+        try sqfs.file.seekTo(opts.offset);
+        sqfs.super_block = try sqfs.file.reader().readStructEndian(
+            SuperBlock,
+            .little,
+        );
 
         if (!std.mem.eql(u8, &sqfs.super_block.magic, SquashFs.magic)) {
             return SquashFsError.InvalidFormat;
         }
-
-        sqfs.super_block.inode_count = littleToNative(sqfs.super_block.inode_count);
-        sqfs.super_block.modification_time = littleToNative(sqfs.super_block.modification_time);
-        sqfs.super_block.block_size = littleToNative(sqfs.super_block.block_size);
-        sqfs.super_block.fragment_entry_count = littleToNative(sqfs.super_block.fragment_entry_count);
-        sqfs.super_block.compression = @enumFromInt(littleToNative(@intFromEnum(sqfs.super_block.compression)));
-        sqfs.super_block.block_log = littleToNative(sqfs.super_block.block_log);
-        sqfs.super_block.flags = littleToNative(sqfs.super_block.flags);
-        sqfs.super_block.id_count = littleToNative(sqfs.super_block.id_count);
-        sqfs.super_block.version_major = littleToNative(sqfs.super_block.version_major);
-        sqfs.super_block.version_minor = littleToNative(sqfs.super_block.version_minor);
-        sqfs.super_block.root_inode_id = littleToNative(sqfs.super_block.root_inode_id);
-        sqfs.super_block.bytes_used = littleToNative(sqfs.super_block.bytes_used);
-        sqfs.super_block.id_table_start = littleToNative(sqfs.super_block.id_table_start);
-        sqfs.super_block.xattr_id_table_start = littleToNative(sqfs.super_block.xattr_id_table_start);
-        sqfs.super_block.inode_table_start = littleToNative(sqfs.super_block.inode_table_start);
-        sqfs.super_block.directory_table_start = littleToNative(sqfs.super_block.directory_table_start);
-        sqfs.super_block.fragment_table_start = littleToNative(sqfs.super_block.fragment_table_start);
-        sqfs.super_block.export_table_start = littleToNative(sqfs.super_block.export_table_start);
 
         const flags = sqfs.super_block.flags;
 
@@ -228,107 +192,69 @@ pub const SquashFs = struct {
         };
     }
 
-    pub inline fn getInode(sqfs: *SquashFs, id: Inode.TableEntry) !Inode {
-        const sqfs_inode = try getInodeFromId(
-            sqfs,
-            id,
-        );
-
-        return Inode{
-            .internal = sqfs_inode,
-            .parent = sqfs,
-            .kind = File.InternalKind.fromInt(
-                sqfs_inode.base.kind,
-            ).toKind(),
-        };
-    }
-
-    fn getInodeFromId(
+    pub fn getInode(
         sqfs: *SquashFs,
         id: Inode.TableEntry,
-    ) !Inode.Internal {
-        var inode = Inode.Internal{
-            .base = std.mem.zeroes(SquashFs.SuperBlock.InodeBase),
-            .nlink = 0,
-            .xattr = 0,
-            .next = std.mem.zeroes(metadata.Cursor),
+    ) !Inode {
+        var cur = metadata.Cursor.init(sqfs, .inode_table, id);
+
+        var inode = Inode{
+            .parent = sqfs,
+            .xattr = SquashFs.invalid_xattr,
+            .next = cur,
+
+            .base = undefined,
+            .kind = undefined,
             .xtra = undefined,
         };
 
-        inode.xattr = SquashFs.invalid_xattr;
-
-        var cur = metadata.Cursor{
-            .sqfs = sqfs,
-            .block = id.block + sqfs.super_block.inode_table_start,
-            .offset = id.offset,
-        };
-
-        inode.next = cur;
-
-        try cur.load(
-            &inode.base,
+        inode.base = try cur.reader().readStructEndian(
+            SuperBlock.InodeBase,
+            .little,
         );
 
-        inode.base = littleToNative(inode.base);
-        const kind = File.InternalKind.fromInt(inode.base.kind);
+        const kind: File.InternalKind = @enumFromInt(inode.base.kind);
 
-        // zig fmt: off
-        inode.base.mode |= switch (kind) {
-            .file, .l_file             => S.IFREG,
-            .directory, .l_directory   => S.IFDIR,
-            .sym_link, .l_sym_link     => S.IFLNK,
-            .named_pipe, .l_named_pipe => S.IFIFO,
-            .block_device, .l_block_device             => S.IFBLK,
-            .character_device, .l_character_device     => S.IFCHR,
-            .unix_domain_socket, .l_unix_domain_socket => S.IFSOCK,
-        };
-        // zig fmt: on
+        inode.kind = kind.toKind();
 
         switch (kind) {
             .file => {
-                var x: SuperBlock.FileInode = undefined;
-
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.FileInode,
+                    .little,
+                );
 
                 inode.xtra = .{ .reg = x.toLong() };
             },
             .l_file => {
-                var x: SuperBlock.LFileInode = undefined;
-
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.LFileInode,
+                    .little,
+                );
 
                 inode.xtra = .{ .reg = x };
             },
             .directory => {
-                var x: SuperBlock.DirInode = undefined;
-
-                try inode.next.load(
-                    &x,
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.DirInode,
+                    .little,
                 );
-
-                x = littleToNative(x);
 
                 inode.xtra = .{ .dir = x.toLong() };
             },
             .l_directory => {
-                var x: SuperBlock.LDirInode = undefined;
-
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.LDirInode,
+                    .little,
+                );
 
                 inode.xtra = .{ .dir = x };
             },
             .sym_link, .l_sym_link => {
-                var x: SuperBlock.SymLinkInode = undefined;
-
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.SymLinkInode,
+                    .little,
+                );
 
                 inode.xtra = .{ .symlink = x };
 
@@ -336,60 +262,50 @@ pub const SquashFs = struct {
                     cur = inode.next;
 
                     // Skip symlink target
-                    try sqfs.mdSkip(
-                        &cur,
-                        x.size,
-                    );
+                    try cur.reader().skipBytes(x.size, .{});
 
-                    //                    try sqfs.mdRead(
-                    //                        sqfs.arena.allocator(),
-                    //                        &cur,
-                    //                        @as([*]u8, @ptrCast(&inode.xtra.symlink.xattr))[0..4],
-                    //                    );
-                    //
-                    //                    inode.xtra.symlink.xattr = std.mem.littleToNative(
-                    //                        u32,
-                    //                        inode.xtra.symlink.xattr,
-                    //                    );
+                    inode.xattr = try cur.reader().readInt(
+                        u32,
+                        .little,
+                    );
                 }
             },
             .block_device, .character_device => {
-                var x: SuperBlock.DevInode = undefined;
-
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.DevInode,
+                    .little,
+                );
 
                 inode.xtra = .{ .dev = x.toLong() };
             },
             .l_block_device, .l_character_device => {
-                var x: SuperBlock.LDevInode = undefined;
-
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.LDevInode,
+                    .little,
+                );
 
                 inode.xtra = .{ .dev = x };
             },
             .unix_domain_socket, .named_pipe => {
-                var x: SuperBlock.IpcInode = undefined;
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.IpcInode,
+                    .little,
+                );
 
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
-
-                inode.nlink = @intCast(x.nlink);
+                inode.xtra = .{ .nlink = x.nlink };
             },
             .l_unix_domain_socket, .l_named_pipe => {
-                var x: SuperBlock.LIpcInode = undefined;
+                const x = try inode.next.reader().readStructEndian(
+                    SuperBlock.LIpcInode,
+                    .little,
+                );
 
-                try inode.next.load(&x);
-
-                x = littleToNative(x);
-
-                inode.nlink = @intCast(x.nlink);
+                inode.xtra = .{ .nlink = x.nlink };
                 inode.xattr = @intCast(x.xattr);
             },
+
+            // TODO: error
+            else => {},
         }
 
         return inode;
@@ -401,22 +317,28 @@ pub const SquashFs = struct {
         ) catch unreachable;
     }
 
+    /// Returns the SquashFS root directory
+    /// This should be the preferred way of accessing files within the archive
     pub fn root(sqfs: *SquashFs) Dir {
         const inode = sqfs.getInode(
             sqfs.super_block.root_inode_id,
         ) catch unreachable;
 
-        if (inode.kind != .directory) unreachable;
+        assert(inode.kind == .directory);
 
         return .{
             .sqfs = sqfs,
-            .cur = .{
-                .sqfs = sqfs,
-                .block = inode.internal.xtra.dir.start_block + sqfs.super_block.directory_table_start,
-                .offset = inode.internal.xtra.dir.offset,
-            },
+            .cur = metadata.Cursor.init(
+                sqfs,
+                .directory_table,
+                .{
+                    .block = inode.xtra.dir.start_block,
+                    .offset = inode.xtra.dir.offset,
+                },
+            ),
+
             .offset = 0,
-            .size = inode.internal.xtra.dir.size -| 3,
+            .size = inode.xtra.dir.size -| 3,
             .header = std.mem.zeroes(SquashFs.Dir.Header),
             .path = sqfs.allocator.alloc(u8, 0) catch unreachable,
         };
@@ -457,15 +379,12 @@ pub const SquashFs = struct {
         var out_buf = sqfs.md_cache.getDataBuf().?;
         const scratch_buf = sqfs.md_cache.getCompressedDataBuf().?;
 
-        const block: metadata.Block = sqfs.md_cache.get(pos.*) orelse blk: {
-            var header: Block.MetadataEntry = undefined;
-
-            try sqfs.load(
-                &header,
-                pos.* + sqfs.opts.offset,
-            );
-
-            header = littleToNative(header);
+        const block = sqfs.md_cache.get(pos.*) orelse blk: {
+            try sqfs.file.seekTo(sqfs.opts.offset + pos.*);
+            const header: Block.MetadataEntry = @bitCast(try sqfs.file.reader().readInt(
+                u16,
+                .little,
+            ));
 
             const block_data = try blockReadIntoBuf(
                 sqfs.md_cache.allocator,
@@ -495,7 +414,7 @@ pub const SquashFs = struct {
     pub const Inode = @import("fs/Inode.zig");
     pub const File = @import("fs/File.zig");
     pub const Dir = @import("fs/Dir.zig");
-    pub const MetadataCursor = metadata.Cursor;
+    //pub const MetadataCursor = metadata.Cursor;
 
     pub fn mdSkip(
         sqfs: *SquashFs,
@@ -613,10 +532,8 @@ fn blockReadIntoBuf(
     var block_data = data.*;
 
     if (compressed) {
-        try sqfs.load(
-            scratch_buf[0..size],
-            pos + sqfs.opts.offset,
-        );
+        try sqfs.file.seekTo(sqfs.opts.offset + pos);
+        _ = try sqfs.file.readAll(scratch_buf[0..size]);
 
         const written = try sqfs.decompressFn(
             allocator,
@@ -627,14 +544,10 @@ fn blockReadIntoBuf(
         return block_data[0..written];
     }
 
-    block_data = block_data[0..size];
+    try sqfs.file.seekTo(sqfs.opts.offset + pos);
+    _ = try sqfs.file.readAll(block_data[0..size]);
 
-    try sqfs.load(
-        block_data,
-        pos + sqfs.opts.offset,
-    );
-
-    return block_data;
+    return block_data[0..size];
 }
 
 pub fn littleToNative(x: anytype) @TypeOf(x) {
