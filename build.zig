@@ -92,13 +92,13 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = clap_dep.path("clap.zig"),
     });
 
-    if (opts.get(.static_fuse)) {
+    if (opts.get(.enable_fuse)) {
         const os = target.result.os.tag;
         if (os != .linux) {
             const error_string = try std.fmt.allocPrint(
                 b.allocator,
                 \\FUSE support for {s} not yet implemented
-                \\please build with `-Dstatic_fuse=false`
+                \\please build with `-Denable_fuse=false`
             ,
                 .{@tagName(os)},
             );
