@@ -409,7 +409,7 @@ pub fn main() !void {
         try FuseOperations.squash.file_tree.put(new_path, entry);
     }
 
-    if (!build_options.@"enable-fuse") return;
+    if (!build_options.static_fuse) return;
 
     // TODO: nicer error printing
     fuse.run(

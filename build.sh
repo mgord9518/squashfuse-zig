@@ -21,14 +21,13 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$ARCH-$OS-$LIBC" \
     -Dstrip=true \
-    -Denable-zlib=true \
-    -Duse-libdeflate=true \
-    -Denable-zstd=true \
-    -Denable-lz4=true \
-    -Denable-xz=true \
-    -Denable-lzo=true \
-    -Denable-fuse="$enable_fuse" \
-    -Duse-system-fuse=false
+    -Dstatic_zlib=true \
+    -Duse_libdeflate=true \
+    -Dstatic_zstd=true \
+    -Dstatic_lz4=true \
+    -Dstatic_xz=true \
+    -Denable_fuse="$enable_fuse" \
+    -Dstatic_fuse=true
 
 if [ "$OS" = "windows" ]; then
     zip -9Xj "squashfuse-$OS-$ARCH.zip" "zig-out/bin/squashfuse.exe"

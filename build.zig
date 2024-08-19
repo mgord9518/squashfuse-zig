@@ -1,41 +1,54 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-var option_list: std.StringHashMap(bool) = undefined;
+var opts: std.enums.EnumArray(Options, bool) = undefined;
+
+pub const Options = enum {
+    strip,
+    static_fuse,
+    enable_fuse,
+    use_libdeflate,
+    use_zig_zlib,
+    use_zig_xz,
+    use_zig_zstd,
+    static_zlib,
+    static_lzma,
+    static_xz,
+    static_lz4,
+    static_zstd,
+};
 
 pub fn build(b: *std.Build) !void {
-    const options = .{
-        .{ "strip", "remove debug info", false },
-        .{ "use-system-fuse", "use system FUSE3 library instead of vendored", false },
-        .{ "enable-fuse", "build with support for FUSE mounting", true },
+    // TODO: re-add descriptions
+    opts = std.enums.EnumArray(Options, bool).init(.{
+        .strip = false,
 
-        .{ "use-libdeflate", "replace zlib with faster libdeflate implementation", true },
-        .{ "use-zig-zlib", "replace zlib with Zig stdlib zlib", false },
-        .{ "use-zig-xz", "replace liblzma with Zig stdlib XZ", false },
-        .{ "use-zig-zstd", "replace liblzma with Zig stdlib ZSTD", false },
+        .enable_fuse = true,
+        .static_fuse = true,
+        .use_libdeflate = true,
 
-        .{ "enable-zlib", "enable zlib decompression. medium ratio, medium speed", true },
-        .{ "enable-lzma", "deprecated and not yet supported", false },
-        .{ "enable-lzo", "unsupported due to licensing", false },
-        .{ "enable-xz", "enable xz decompression. very high ratio, slow speed", true },
-        .{ "enable-lz4", "enable lz4 decompression. low ratio, very fast speed", true },
-        .{ "enable-zstd", "enable zstd decompression. high ratio, fast speed", true },
-    };
+        .use_zig_zlib = false,
+        .use_zig_xz = false,
+        .use_zig_zstd = false,
 
-    option_list = std.StringHashMap(bool).init(b.allocator);
+        .static_zlib = true,
+        .static_lzma = false,
+        .static_xz = true,
+        .static_lz4 = true,
+        .static_zstd = true,
+    });
+
+    var it = opts.iterator();
 
     const lib_options = b.addOptions();
-    inline for (options) |option| {
+    while (it.next()) |entry| {
         const opt = b.option(
             bool,
-            option[0],
-            option[1],
-        ) orelse option[2];
+            @tagName(entry.key),
+            "",
+        ) orelse entry.value.*;
 
-        // TODO: There's probably a much better way to do this
-        try option_list.put(option[0], opt);
-
-        lib_options.addOption(bool, option[0], opt);
+        lib_options.addOption(bool, @tagName(entry.key), opt);
     }
 
     const target = b.standardTargetOptions(.{});
@@ -46,7 +59,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = option_list.get("strip").?,
+        .strip = opts.get(.strip),
     });
 
     const squashfuse_module = b.addModule("squashfuse", .{
@@ -67,7 +80,7 @@ pub fn build(b: *std.Build) !void {
     const fuse_dep = b.dependency("fuse", .{
         .target = target,
         .optimize = optimize,
-        //.use_system_fuse = option_list.get("use-system-fuse").?,
+        //.use_system_fuse = opts.get("use-system-fuse").?,
     });
 
     const fuse_module = b.addModule(
@@ -79,13 +92,13 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = clap_dep.path("clap.zig"),
     });
 
-    if (option_list.get("enable-fuse").?) {
+    if (opts.get(.static_fuse)) {
         const os = target.result.os.tag;
         if (os != .linux) {
             const error_string = try std.fmt.allocPrint(
                 b.allocator,
                 \\FUSE support for {s} not yet implemented
-                \\please build with `-Denable-fuse=false`
+                \\please build with `-Dstatic_fuse=false`
             ,
                 .{@tagName(os)},
             );
@@ -95,20 +108,21 @@ pub fn build(b: *std.Build) !void {
             @panic(error_string);
         }
 
-        if (option_list.get("use-system-fuse").?) {
-            exe.linkSystemLibrary("fuse3");
-        } else {
+        if (opts.get(.static_fuse)) {
             exe.linkLibrary(fuse_dep.artifact("fuse"));
+        } else {
+            // TODO: use DynLib
+            exe.linkSystemLibrary("fuse3");
         }
     }
 
-    if (option_list.get("enable-zlib").? and !option_list.get("use-zig-zlib").?) {
-        if (option_list.get("use-libdeflate").?) {
+    if (opts.get(.static_zlib) and !opts.get(.use_zig_zlib)) {
+        if (opts.get(.use_libdeflate)) {
             const lib = try buildLibdeflate(b, .{
                 .name = "deflate",
                 .target = target,
                 .optimize = optimize,
-                .strip = option_list.get("strip").?,
+                .strip = opts.get(.strip),
             });
 
             b.installArtifact(lib);
@@ -117,40 +131,49 @@ pub fn build(b: *std.Build) !void {
             // TODO: maybe vendor zlib? Idk, I don't see the benefit. Anyone
             // I imagine specifically choosing zlib probably wants it as it's
             // a system library on essentially every Linux distro
-            exe.linkSystemLibrary("zlib");
+            //exe.linkSystemLibrary("zlib");
         }
     }
 
-    if (option_list.get("enable-xz").? and !option_list.get("use-zig-xz").?) {
+    if (opts.get(.static_xz) and !opts.get(.use_zig_xz)) {
         const lib = try buildLiblzma(b, .{
             .name = "lzma",
             .target = target,
             .optimize = optimize,
-            .strip = option_list.get("strip").?,
+            .strip = opts.get(.strip),
         });
 
         b.installArtifact(lib);
         exe.linkLibrary(lib);
     }
 
-    if (option_list.get("enable-lz4").?) {
+    if (opts.get(.static_lz4)) {
         const lib = try buildLiblz4(b, .{
             .name = "lz4",
             .target = target,
             .optimize = optimize,
-            .strip = option_list.get("strip").?,
+            .strip = opts.get(.strip),
         });
 
         b.installArtifact(lib);
         exe.linkLibrary(lib);
+    } else {
+        const lib = try buildLiblz4(b, .{
+            .name = "lz4",
+            .target = target,
+            .optimize = optimize,
+            .strip = opts.get(.strip),
+        });
+
+        b.installArtifact(lib);
     }
 
-    if (option_list.get("enable-zstd").? and !option_list.get("use-zig-zstd").?) {
+    if (opts.get(.static_zstd) and !opts.get(.use_zig_zstd)) {
         const lib = try buildLibzstd(b, .{
             .name = "zstd",
             .target = target,
             .optimize = optimize,
-            .strip = option_list.get("strip").?,
+            .strip = opts.get(.strip),
         });
 
         b.installArtifact(lib);
@@ -176,7 +199,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("test/test.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = option_list.get("strip").?,
+        .strip = opts.get(.strip),
     });
 
     unit_tests.root_module.addImport("squashfuse", squashfuse_module);

@@ -2,13 +2,19 @@ const std = @import("std");
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
-extern fn ZSTD_getErrorCode(usize) usize;
-extern fn ZSTD_decompress(
+pub const LibDecodeFn = fn (
     [*]u8,
     usize,
     [*]const u8,
     usize,
-) usize;
+) callconv(.C) usize;
+
+pub const lib_decode_name = "ZSTD_decompress";
+
+// Initialized in `compression.zig`
+pub var lib_decode: *const LibDecodeFn = undefined;
+
+extern fn ZSTD_getErrorCode(usize) usize;
 
 pub fn decode(
     allocator: std.mem.Allocator,
@@ -17,7 +23,7 @@ pub fn decode(
 ) DecompressError!usize {
     _ = allocator;
 
-    const ret = ZSTD_decompress(
+    const ret = lib_decode(
         out.ptr,
         out.len,
         in.ptr,

@@ -2,12 +2,17 @@ const std = @import("std");
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
-extern fn LZ4_decompress_safe(
+pub const LibDecodeFn = fn (
     [*]const u8,
     [*]u8,
     c_int,
     c_int,
-) c_int;
+) callconv(.C) c_int;
+
+pub const lib_decode_name = "LZ4_decompress_safe";
+
+// Initialized in `compression.zig`
+pub var lib_decode: *const LibDecodeFn = undefined;
 
 pub fn decode(
     allocator: std.mem.Allocator,
@@ -16,7 +21,7 @@ pub fn decode(
 ) DecompressError!usize {
     _ = allocator;
 
-    const ret = LZ4_decompress_safe(
+    const ret = lib_decode(
         in.ptr,
         out.ptr,
         @intCast(in.len),
