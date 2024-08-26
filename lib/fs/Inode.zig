@@ -137,40 +137,41 @@ pub fn pread(
         var block_data: ?[]u8 = null;
         var data_off: u64 = 0;
         var data_size: u64 = 0;
-        var take: usize = 0;
 
-        const fragment = block_list.remain == 0;
-        if (fragment) {
+        const maybe_entry = block_list.next() catch return error.SystemResources;
+        if (maybe_entry) |entry| {
+            if (block_list.pos + block_size <= offset) continue;
+
+            data_off = 0;
+            //if (block_list.input_size == 0) {
+            if (entry.size == 0) {
+                data_size = @min(
+                    file_size - block_list.pos,
+                    block_size,
+                );
+            } else {
+                block_data = sqfs.dataCache(
+                    &sqfs.data_cache,
+                    block_list.block - entry.size,
+                    entry,
+                ) catch return error.SystemResources;
+
+                data_size = block_data.?.len;
+            }
+        } else {
+            // Fragment
             if (inode.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
 
             block_data = inode.fragBlock(
                 &data_off,
                 &data_size,
             ) catch return error.SystemResources;
-        } else {
-            // TODO
-            block_list.next() catch return error.SystemResources;
-
-            if (block_list.pos + block_size <= offset) continue;
-
-            data_off = 0;
-            if (block_list.input_size == 0) {
-                data_size = @intCast(file_size - block_list.pos);
-
-                if (data_size > block_size) data_size = block_size;
-            } else {
-                block_data = sqfs.dataCache(
-                    &sqfs.data_cache,
-                    block_list.block,
-                    block_list.header,
-                ) catch return error.SystemResources;
-
-                data_size = block_data.?.len;
-            }
         }
 
-        take = @intCast(data_size - read_off);
-        if (take > nbuf.len) take = nbuf.len;
+        const take = @min(
+            data_size - read_off,
+            nbuf.len,
+        );
 
         if (block_data) |b| {
             @memcpy(
@@ -178,13 +179,14 @@ pub fn pread(
                 b[@intCast(data_off + read_off)..][0..take],
             );
         } else {
+            // Sparse block
             @memset(nbuf[0..take], 0);
         }
 
         read_off = 0;
         nbuf = nbuf[take..];
 
-        if (fragment) break;
+        if (maybe_entry == null) break;
     }
 
     const size = buf.len - nbuf.len;

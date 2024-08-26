@@ -57,7 +57,11 @@ fn populateInodeMapIfNull(sqfs: *SquashFs) !void {
     }
 }
 
-pub const OpenError = std.fs.File.OpenError;
+pub const OpenError = std.fs.Dir.OpenError;
+
+//pub fn openFile(dir: *Dir,
+//    sub_path: []const u8,
+//    )
 
 pub fn openDir(
     dir: *Dir,
@@ -88,7 +92,13 @@ pub fn openDir(
         sqfs,
         inode_entry,
         path,
-    ) catch return error.SystemResources;
+    ) catch |err| {
+        // TODO: better errors
+        return switch (err) {
+            error.NotDir => error.NotDir,
+            else => error.SystemResources,
+        };
+    };
 }
 
 pub fn close(dir: *Dir) void {

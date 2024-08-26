@@ -108,17 +108,18 @@ pub fn builtWithDecompression(comptime compression: Compression) bool {
 pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
     switch (kind) {
         .zlib => {
-            const libdeflate = @import("compression/zlib_libdeflate.zig");
-
-            if (build_options.use_zig_zlib) {
+            if (build_options.zlib_decompressor == .zig_stdlib) {
                 return @import("compression/zlib_zig.zig").decode;
             }
+
+            const libdeflate = @import("compression/zlib_libdeflate.zig");
+            initDecompressionSymbol(libdeflate, .zlib, "deflate") catch return error.Error;
 
             return libdeflate.decode;
         },
         .lzma, .lzo => return error.InvalidCompression,
         .xz => {
-            if (build_options.use_zig_xz) {
+            if (build_options.xz_decompressor == .zig_stdlib) {
                 return @import("compression/xz_zig.zig").decode;
             }
 
@@ -134,7 +135,7 @@ pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
             return liblz4.decode;
         },
         .zstd => {
-            if (build_options.use_zig_zstd) {
+            if (build_options.zstd_decompressor == .zig_stdlib) {
                 return @import("compression/zstd_zig.zig").decode;
             }
 

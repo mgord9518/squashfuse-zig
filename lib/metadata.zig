@@ -102,39 +102,4 @@ pub const Cursor = extern struct {
 
         return take;
     }
-
-    pub fn readOld(
-        cur: *Cursor,
-        buf: []u8,
-    ) ReadError!usize {
-        var block_offset = cur.block;
-        var idx: usize = 0;
-
-        var block = try cur.sqfs.mdCache(&block_offset);
-
-        while (idx < buf.len) {
-            const take = @min(
-                block.data[cur.offset..].len,
-                buf[idx..].len,
-            );
-
-            @memcpy(
-                buf[idx..][0..take],
-                block.data[cur.offset..][0..take],
-            );
-
-            idx += take;
-            cur.offset += take;
-
-            // Move to next block
-            if (cur.offset == block.data.len) {
-                cur.block = block_offset;
-                cur.offset = 0;
-
-                block = try cur.sqfs.mdCache(&block_offset);
-            }
-        }
-
-        return buf.len;
-    }
 };

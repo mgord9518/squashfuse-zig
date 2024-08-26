@@ -1,55 +1,36 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-var opts: std.enums.EnumArray(Options, bool) = undefined;
-
-pub const Options = enum {
-    strip,
-    static_fuse,
-    enable_fuse,
-    use_libdeflate,
-    use_zig_zlib,
-    use_zig_xz,
-    use_zig_zstd,
-    static_zlib,
-    static_lzma,
-    static_xz,
-    static_lz4,
-    static_zstd,
-};
-
 pub fn build(b: *std.Build) !void {
-    // TODO: re-add descriptions
-    opts = std.enums.EnumArray(Options, bool).init(.{
-        .strip = false,
-
-        .enable_fuse = true,
-        .static_fuse = true,
-        .use_libdeflate = true,
-
-        .use_zig_zlib = false,
-        .use_zig_xz = false,
-        .use_zig_zstd = false,
-
-        .static_zlib = true,
-        .static_lzma = false,
-        .static_xz = true,
-        .static_lz4 = true,
-        .static_zstd = true,
-    });
-
-    var it = opts.iterator();
-
     const lib_options = b.addOptions();
-    while (it.next()) |entry| {
-        const opt = b.option(
-            bool,
-            @tagName(entry.key),
-            "",
-        ) orelse entry.value.*;
 
-        lib_options.addOption(bool, @tagName(entry.key), opt);
-    }
+    const strip = b.option(bool, "strip", "remove debug symbols from executable") orelse false;
+    lib_options.addOption(bool, "strip", strip);
+
+    const enable_fuse = b.option(bool, "enable_fuse", "enable usersystem mounting (FUSE)") orelse true;
+    lib_options.addOption(bool, "enable_fuse", enable_fuse);
+    const static_fuse = b.option(bool, "static_fuse", "static link FUSE") orelse true;
+    lib_options.addOption(bool, "static_fuse", static_fuse);
+
+    const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .libdeflate;
+    lib_options.addOption(ZlibDecompressor, "zlib_decompressor", zlib_decompressor);
+    const static_zlib = b.option(bool, "static_zlib", "static link zlib") orelse true;
+    lib_options.addOption(bool, "static_zlib", static_zlib);
+
+    const xz_decompressor = b.option(XzDecompressor, "xz_decompressor", "Decompressor to use for xz streams") orelse .liblzma;
+    lib_options.addOption(XzDecompressor, "xz_decompressor", xz_decompressor);
+    const static_xz = b.option(bool, "static_xz", "static link xz") orelse true;
+    lib_options.addOption(bool, "static_xz", static_xz);
+
+    const lz4_decompressor = b.option(Lz4Decompressor, "lz4_decompressor", "Decompressor to use for lz4 streams") orelse .liblz4;
+    lib_options.addOption(Lz4Decompressor, "lz4_decompressor", lz4_decompressor);
+    const static_lz4 = b.option(bool, "static_lz4", "static link liblz4") orelse true;
+    lib_options.addOption(bool, "static_lz4", static_lz4);
+
+    const zstd_decompressor = b.option(ZstdDecompressor, "zstd_decompressor", "Decompressor to use for zstd streams") orelse .libzstd;
+    lib_options.addOption(ZstdDecompressor, "zstd_decompressor", zstd_decompressor);
+    const static_zstd = b.option(bool, "static_zstd", "static link libzstd") orelse true;
+    lib_options.addOption(bool, "static_zstd", static_zstd);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -59,7 +40,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = opts.get(.strip),
+        .strip = strip,
     });
 
     const squashfuse_module = b.addModule("squashfuse", .{
@@ -80,7 +61,6 @@ pub fn build(b: *std.Build) !void {
     const fuse_dep = b.dependency("fuse", .{
         .target = target,
         .optimize = optimize,
-        //.use_system_fuse = opts.get("use-system-fuse").?,
     });
 
     const fuse_module = b.addModule(
@@ -92,7 +72,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = clap_dep.path("clap.zig"),
     });
 
-    if (opts.get(.enable_fuse)) {
+    if (enable_fuse) {
         const os = target.result.os.tag;
         if (os != .linux) {
             const error_string = try std.fmt.allocPrint(
@@ -108,7 +88,7 @@ pub fn build(b: *std.Build) !void {
             @panic(error_string);
         }
 
-        if (opts.get(.static_fuse)) {
+        if (static_fuse) {
             exe.linkLibrary(fuse_dep.artifact("fuse"));
         } else {
             // TODO: use DynLib
@@ -116,43 +96,36 @@ pub fn build(b: *std.Build) !void {
         }
     }
 
-    if (opts.get(.static_zlib) and !opts.get(.use_zig_zlib)) {
-        if (opts.get(.use_libdeflate)) {
-            const lib = try buildLibdeflate(b, .{
-                .name = "deflate",
-                .target = target,
-                .optimize = optimize,
-                .strip = opts.get(.strip),
-            });
-
-            b.installArtifact(lib);
-            exe.linkLibrary(lib);
-        } else {
-            // TODO: maybe vendor zlib? Idk, I don't see the benefit. Anyone
-            // I imagine specifically choosing zlib probably wants it as it's
-            // a system library on essentially every Linux distro
-            //exe.linkSystemLibrary("zlib");
-        }
-    }
-
-    if (opts.get(.static_xz) and !opts.get(.use_zig_xz)) {
-        const lib = try buildLiblzma(b, .{
-            .name = "lzma",
+    if (zlib_decompressor == .libdeflate and static_zlib) {
+        const lib = try buildLibdeflate(b, .{
+            .name = "deflate",
             .target = target,
             .optimize = optimize,
-            .strip = opts.get(.strip),
+            .strip = strip,
         });
 
         b.installArtifact(lib);
         exe.linkLibrary(lib);
     }
 
-    if (opts.get(.static_lz4)) {
+    if (xz_decompressor == .liblzma and static_xz) {
+        const lib = try buildLiblzma(b, .{
+            .name = "lzma",
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+        });
+
+        b.installArtifact(lib);
+        exe.linkLibrary(lib);
+    }
+
+    if (lz4_decompressor == .liblz4 and static_lz4) {
         const lib = try buildLiblz4(b, .{
             .name = "lz4",
             .target = target,
             .optimize = optimize,
-            .strip = opts.get(.strip),
+            .strip = strip,
         });
 
         b.installArtifact(lib);
@@ -162,18 +135,18 @@ pub fn build(b: *std.Build) !void {
             .name = "lz4",
             .target = target,
             .optimize = optimize,
-            .strip = opts.get(.strip),
+            .strip = strip,
         });
 
         b.installArtifact(lib);
     }
 
-    if (opts.get(.static_zstd) and !opts.get(.use_zig_zstd)) {
+    if (zstd_decompressor == .libzstd and static_zstd) {
         const lib = try buildLibzstd(b, .{
             .name = "zstd",
             .target = target,
             .optimize = optimize,
-            .strip = opts.get(.strip),
+            .strip = strip,
         });
 
         b.installArtifact(lib);
@@ -199,7 +172,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("test/test.zig"),
         .target = target,
         .optimize = optimize,
-        .strip = opts.get(.strip),
+        .strip = strip,
     });
 
     unit_tests.root_module.addImport("squashfuse", squashfuse_module);
@@ -510,3 +483,22 @@ pub fn buildLibzstd(
 
     return lib;
 }
+
+const ZlibDecompressor = enum {
+    zig_stdlib,
+    libdeflate,
+};
+
+const XzDecompressor = enum {
+    zig_stdlib,
+    liblzma,
+};
+
+const ZstdDecompressor = enum {
+    zig_stdlib,
+    libzstd,
+};
+
+const Lz4Decompressor = enum {
+    liblz4,
+};

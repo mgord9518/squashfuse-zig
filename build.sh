@@ -22,7 +22,6 @@ zig build \
     -Dtarget="$ARCH-$OS-$LIBC" \
     -Dstrip=true \
     -Dstatic_zlib=true \
-    -Duse_libdeflate=true \
     -Dstatic_zstd=true \
     -Dstatic_lz4=true \
     -Dstatic_xz=true \

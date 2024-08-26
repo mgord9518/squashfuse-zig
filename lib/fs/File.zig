@@ -52,7 +52,6 @@ pub const BlockList = extern struct {
     pos: u64,
 
     block: u64,
-    header: SquashFs.Block.DataEntry,
     input_size: u32,
 
     pub fn init(sqfs: *SquashFs, inode: *SquashFs.Inode) !BlockList {
@@ -62,7 +61,6 @@ pub const BlockList = extern struct {
             .cur = inode.next,
             .started = false,
             .pos = 0,
-            .header = .{ .is_uncompressed = false, .size = 0 },
             .block = inode.xtra.reg.start_block,
             .input_size = 0,
         };
@@ -79,28 +77,40 @@ pub const BlockList = extern struct {
         return @intCast(size / block);
     }
 
-    pub fn next(bl: *BlockList) !void {
-        if (bl.remain == 0) {
-            // TODO: better errors
-            return error.NoRemain;
-        }
+    pub fn next(block_list: *BlockList) !?SquashFs.Block.DataEntry {
+        if (block_list.remain == 0) return null;
 
-        bl.remain -= 1;
+        block_list.remain -= 1;
 
-        try bl.cur.load(
-            &bl.header,
+        var entry: SquashFs.Block.DataEntry = undefined;
+        try block_list.cur.load(
+            &entry,
         );
 
-        bl.header = squashfuse.littleToNative(bl.header);
+        entry = squashfuse.littleToNative(entry);
 
-        bl.block += bl.input_size;
+        block_list.block += entry.size;
 
-        bl.input_size = bl.header.size;
-
-        if (bl.started) {
-            bl.pos += bl.sqfs.super_block.block_size;
+        if (block_list.started) {
+            block_list.pos += block_list.sqfs.super_block.block_size;
         }
 
-        bl.started = true;
+        block_list.started = true;
+
+        return entry;
+    }
+
+    // TODO
+    pub fn previous(block_list: *BlockList) !?SquashFs.Block.DataEntry {
+        if (block_list.pos == 0 and block_list.started) return null;
+
+        block_list.remain += 1;
+
+        var entry: SquashFs.Block.DataEntry = undefined;
+        try block_list.cur.load(
+            &entry,
+        );
+
+        entry = squashfuse.littleToNative(entry);
     }
 };

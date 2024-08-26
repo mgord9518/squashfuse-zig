@@ -2,14 +2,19 @@ const std = @import("std");
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
-extern fn libdeflate_zlib_decompress(
+pub const LibDecodeFn = fn (
     *anyopaque,
     [*]const u8,
     usize,
     [*]u8,
     usize,
     *usize,
-) c_int;
+) callconv(.C) c_int;
+
+pub const lib_decode_name = "libdeflate_zlib_decompress";
+
+// Initialized in `compression.zig`
+pub var lib_decode: *const LibDecodeFn = undefined;
 
 // Deflate constants
 const litlen_syms = 288;
@@ -53,7 +58,7 @@ pub fn decode(
 
     var written: usize = undefined;
 
-    const err = libdeflate_zlib_decompress(
+    const err = lib_decode(
         &decompressor,
         in.ptr,
         in.len,
