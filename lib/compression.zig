@@ -98,24 +98,25 @@ pub const Decompressor = *const fn (
     out: []u8,
 ) DecompressError!usize;
 
-pub fn builtWithDecompression(comptime compression: Compression) bool {
-    if (compression == .none) return true;
-
-    const decl_name = "static_" ++ @tagName(compression);
-    return @hasDecl(build_options, decl_name) and @field(build_options, decl_name);
-}
-
 pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
     switch (kind) {
         .zlib => {
-            if (build_options.zlib_decompressor == .zig_stdlib) {
-                return @import("compression/zlib_zig.zig").decode;
-            }
-
             const libdeflate = @import("compression/zlib_libdeflate.zig");
-            initDecompressionSymbol(libdeflate, .zlib, "deflate") catch return error.Error;
+            const libz = @import("compression/zlib_libz.zig");
 
-            return libdeflate.decode;
+            return switch (build_options.zlib_decompressor) {
+                .zig_stdlib => @import("compression/zlib_zig.zig").decode,
+                .libdeflate => blk: {
+                    initDecompressionSymbol(libdeflate, .zlib, "libdeflate") catch return error.Error;
+
+                    break :blk libdeflate.decode;
+                },
+                .libz => blk: {
+                    initDecompressionSymbol(libz, .zlib, "libz") catch return error.Error;
+
+                    break :blk libz.decode;
+                },
+            };
         },
         .lzma, .lzo => return error.InvalidCompression,
         .xz => {
@@ -124,13 +125,13 @@ pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
             }
 
             const libxz = @import("compression/xz_liblzma.zig");
-            initDecompressionSymbol(libxz, .xz, "lzma") catch return error.Error;
+            initDecompressionSymbol(libxz, .xz, "liblzma") catch return error.Error;
 
             return libxz.decode;
         },
         .lz4 => {
             const liblz4 = @import("compression/lz4_liblz4.zig");
-            initDecompressionSymbol(liblz4, .lz4, "lz4") catch return error.Error;
+            initDecompressionSymbol(liblz4, .lz4, "liblz4") catch return error.Error;
 
             return liblz4.decode;
         },
@@ -140,7 +141,7 @@ pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
             }
 
             const libzstd = @import("compression/zstd_libzstd.zig");
-            initDecompressionSymbol(libzstd, .zstd, "zstd") catch return error.Error;
+            initDecompressionSymbol(libzstd, .zstd, "libzstd") catch return error.Error;
 
             return libzstd.decode;
         },
@@ -151,29 +152,48 @@ pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
     return error.InvalidCompression;
 }
 
+pub fn builtWithDecompression(comptime compression: Compression) bool {
+    if (compression == .none) return true;
+
+    const decl_name = "static_" ++ @tagName(compression);
+
+    return @hasDecl(build_options, decl_name) and @field(build_options, decl_name);
+}
+
+// Initializes decompression function pointers for C-ABI compression libs
+// If `static_[DECOMPRESSOR]` is not given, an attempt will be made to
+// dlload the library from the system
 fn initDecompressionSymbol(
     comptime T: type,
     comptime compression: Compression,
     comptime library_name: []const u8,
 ) !void {
-    if (builtWithDecompression(compression)) {
-        T.lib_decode = @extern(
-            *const T.LibDecodeFn,
-            .{ .name = T.lib_decode_name },
-        );
+    if (comptime builtWithDecompression(compression)) {
+        inline for (@typeInfo(T.required_symbols).Struct.decls) |decl| {
+            @field(T.required_symbols, decl.name) = @extern(
+                @TypeOf(@field(T.required_symbols, decl.name)),
+                .{ .name = decl.name },
+            );
+        }
 
         return;
     }
 
+    var found = false;
+
     // Looks like it wasn't statically linked, attempt to find the library on
     // the system
     inline for (.{
-        "/lib/lib{s}.so.1",
-        "/lib64/lib{s}.so.1",
-        "/usr/lib/lib{s}.so.1",
-        "/usr/lib64/lib{s}.so.1",
+        "/lib/{s}.so.1",
+        "/lib64/{s}.so.1",
+        "/usr/lib/{s}.so.1",
+        "/usr/lib64/{s}.so.1",
     }) |fmt| {
-        const path = std.fmt.comptimePrint(fmt, .{library_name});
+        const path = std.fmt.comptimePrint(
+            fmt,
+            .{library_name},
+        );
+
         // TODO: close libs
         var lib = DynLib.open(path) catch |err| {
             switch (err) {
@@ -182,11 +202,18 @@ fn initDecompressionSymbol(
             }
         };
 
-        T.lib_decode = lib.lookup(
-            *const T.LibDecodeFn,
-            T.lib_decode_name,
-        ) orelse return error.SymbolNotFound;
+        inline for (@typeInfo(T.required_symbols).Struct.decls) |decl| {
+            @field(T.required_symbols, decl.name) = lib.lookup(
+                @TypeOf(@field(T.required_symbols, decl.name)),
+                decl.name,
+            ) orelse return error.SymbolNotFound;
+        }
+
+        found = true;
+        break;
     }
+
+    if (!found) return error.DynLibNotFound;
 }
 
 // Since the decompressor will never be called on uncompressed blocks,

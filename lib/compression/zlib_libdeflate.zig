@@ -2,19 +2,47 @@ const std = @import("std");
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
-pub const LibDecodeFn = fn (
-    *anyopaque,
-    [*]const u8,
-    usize,
-    [*]u8,
-    usize,
-    *usize,
-) callconv(.C) c_int;
+pub const required_symbols = struct {
+    pub var libdeflate_zlib_decompress: *const fn (
+        *anyopaque,
+        [*]const u8,
+        usize,
+        [*]u8,
+        usize,
+        *usize,
+    ) callconv(.C) c_int = undefined;
+};
 
-pub const lib_decode_name = "libdeflate_zlib_decompress";
+pub fn decode(
+    allocator: std.mem.Allocator,
+    in: []const u8,
+    out: []u8,
+) DecompressError!usize {
+    _ = allocator;
 
-// Initialized in `compression.zig`
-pub var lib_decode: *const LibDecodeFn = undefined;
+    var decompressor = Decompressor{};
+
+    var written: usize = undefined;
+
+    const err = required_symbols.libdeflate_zlib_decompress(
+        &decompressor,
+        in.ptr,
+        in.len,
+        out.ptr,
+        out.len,
+        &written,
+    );
+
+    return switch (err) {
+        // Defined in <https://github.com/ebiggers/libdeflate/blob/master/libdeflate.h>
+        0 => written,
+
+        1 => DecompressError.CorruptInput,
+        2 => DecompressError.ShortOutput,
+        3 => DecompressError.NoSpaceLeft,
+        else => DecompressError.Error,
+    };
+}
 
 // Deflate constants
 const litlen_syms = 288;
@@ -46,34 +74,3 @@ const Decompressor = extern struct {
     litlen_tablebits: u32 = undefined,
     free_func: ?*anyopaque = undefined,
 };
-
-pub fn decode(
-    allocator: std.mem.Allocator,
-    in: []const u8,
-    out: []u8,
-) DecompressError!usize {
-    _ = allocator;
-
-    var decompressor = Decompressor{};
-
-    var written: usize = undefined;
-
-    const err = lib_decode(
-        &decompressor,
-        in.ptr,
-        in.len,
-        out.ptr,
-        out.len,
-        &written,
-    );
-
-    return switch (err) {
-        // Defined in <https://github.com/ebiggers/libdeflate/blob/master/libdeflate.h>
-        0 => written,
-
-        1 => DecompressError.CorruptInput,
-        2 => DecompressError.ShortOutput,
-        3 => DecompressError.NoSpaceLeft,
-        else => DecompressError.Error,
-    };
-}

@@ -3,23 +3,20 @@ const io = std.io;
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
-pub const lib_decode_name = "lzma_stream_buffer_decode";
-
-// Initialized in `compression.zig`
-pub var lib_decode: *const LibDecodeFn = undefined;
-
-pub const LibDecodeFn = fn (
-    memlemit: *u64,
-    flags: u32,
-    // TODO: set allocator
-    allocator: ?*anyopaque,
-    in: [*]const u8,
-    in_pos: *usize,
-    in_size: usize,
-    out: [*]u8,
-    out_pos: *usize,
-    out_size: usize,
-) callconv(.C) c_int;
+pub const required_symbols = struct {
+    pub var lzma_stream_buffer_decode: *const fn (
+        memlemit: *u64,
+        flags: u32,
+        // TODO: set allocator
+        allocator: ?*anyopaque,
+        in: [*]const u8,
+        in_pos: *usize,
+        in_size: usize,
+        out: [*]u8,
+        out_pos: *usize,
+        out_size: usize,
+    ) callconv(.C) c_int = undefined;
+};
 
 pub fn decode(
     allocator: std.mem.Allocator,
@@ -33,7 +30,7 @@ pub fn decode(
     var inpos: usize = 0;
     var outpos: usize = 0;
 
-    const err = lib_decode(
+    const err = required_symbols.lzma_stream_buffer_decode(
         &memlimit,
         0,
         null,

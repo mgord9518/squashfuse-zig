@@ -2,19 +2,18 @@ const std = @import("std");
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
-pub const LibDecodeFn = fn (
-    [*]u8,
-    usize,
-    [*]const u8,
-    usize,
-) callconv(.C) usize;
+pub const required_symbols = struct {
+    pub var ZSTD_decompress: *const fn (
+        [*]u8,
+        usize,
+        [*]const u8,
+        usize,
+    ) callconv(.C) usize = undefined;
 
-pub const lib_decode_name = "ZSTD_decompress";
-
-// Initialized in `compression.zig`
-pub var lib_decode: *const LibDecodeFn = undefined;
-
-extern fn ZSTD_getErrorCode(usize) usize;
+    pub var ZSTD_getErrorCode: *const fn (
+        usize,
+    ) callconv(.C) usize = undefined;
+};
 
 pub fn decode(
     allocator: std.mem.Allocator,
@@ -23,14 +22,14 @@ pub fn decode(
 ) DecompressError!usize {
     _ = allocator;
 
-    const ret = lib_decode(
+    const ret = required_symbols.ZSTD_decompress(
         out.ptr,
         out.len,
         in.ptr,
         in.len,
     );
 
-    return switch (ZSTD_getErrorCode(ret)) {
+    return switch (required_symbols.ZSTD_getErrorCode(ret)) {
         0 => ret,
 
         20 => error.CorruptInput,

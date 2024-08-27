@@ -487,6 +487,7 @@ pub fn buildLibzstd(
 const ZlibDecompressor = enum {
     zig_stdlib,
     libdeflate,
+    libz,
 };
 
 const XzDecompressor = enum {
