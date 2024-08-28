@@ -47,12 +47,12 @@ jobs:
 
     - name: Test
       run: |
-        zig build test
+        zig build test -Dstatic_lz4=true
         zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
         zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
         zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall
 
-        zig build test
+        zig build test -Dstatic_lz4=true
         zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
         zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
         zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSmall
