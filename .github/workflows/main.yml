@@ -48,14 +48,14 @@ jobs:
     - name: Test
       run: |
         zig build test
-        zig build test -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
-        zig build test -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
-        zig build test -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall
+        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
+        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
+        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall
 
         zig build test
-        zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
-        zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
-        zig build test -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSmall
+        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
+        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSmall
 
     - name: Upload build
       uses: "marvinpinto/action-automatic-releases@latest"

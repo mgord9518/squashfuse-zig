@@ -4,38 +4,42 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // As of now, there isn't a way to disable a compression library, so every
+    // one will either be statically linked in or an attempt will be made to
+    // dlload it from the system
+    //
+    // This will be changed in the future, but the API will probably stay the
+    // same
     const squashfuse_dep = b.dependency("squashfuse", .{
         .target = target,
         .optimize = optimize,
 
-        // These options will be renamed in the future
-        .@"enable-zlib" = true,
-        .@"use-libdeflate" = true,
-        .@"enable-xz" = true,
-        .@"enable-lz4" = true,
+        .zlib_decompressor = .libz,
+        .static_zlib = false,
 
-        .@"enable-lzma" = false,
-        .@"enable-lzo" = false,
-        .@"enable-zstd" = false,
+        .zstd_decompressor = .libzstd,
+        .static_zstd = true,
     });
 
     const exe = b.addExecutable(.{
-        .name = "example",
+        .name = "squashfs_inspector",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    // When using compression libraries implemented in C, they must be linked
-    // to the main executable
-    exe.linkLibrary(squashfuse_dep.artifact("deflate"));
-    exe.linkLibrary(squashfuse_dep.artifact("lz4"));
-    exe.linkLibrary(squashfuse_dep.artifact("lzma"));
+    // libc should be explicitly linked unless all compression libraries are
+    // using the Zig implementation or are statically linked
+    exe.linkLibC();
 
     exe.root_module.addImport(
         "squashfuse",
         squashfuse_dep.module("squashfuse"),
     );
+
+    // If a C-ABI compression library is used and static building is enabled,
+    // the library must be linked here
+    exe.linkLibrary(squashfuse_dep.artifact("zstd"));
 
     b.installArtifact(exe);
 

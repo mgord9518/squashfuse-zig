@@ -11,7 +11,8 @@ pub fn main() !void {
 
     const argv0 = args_it.next().?;
     const argv1 = args_it.next() orelse {
-        std.debug.print("usage: {s} <squashfs>\n", .{argv0});
+        std.debug.print("SquashFS inspector!\n", .{});
+        std.debug.print("usage: {s} <SQUASHFS>\n", .{argv0});
         return;
     };
 
