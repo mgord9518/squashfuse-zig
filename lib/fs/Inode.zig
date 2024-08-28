@@ -143,7 +143,6 @@ pub fn pread(
             if (block_list.pos + block_size <= offset) continue;
 
             data_off = 0;
-            //if (block_list.input_size == 0) {
             if (entry.size == 0) {
                 data_size = @min(
                     file_size - block_list.pos,

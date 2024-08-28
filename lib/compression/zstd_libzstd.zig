@@ -15,12 +15,21 @@ pub const required_symbols = struct {
     ) callconv(.C) usize = undefined;
 };
 
-pub fn decode(
-    allocator: std.mem.Allocator,
+pub fn init(allocator: std.mem.Allocator) *anyopaque {
+    _ = allocator;
+    return undefined;
+}
+
+pub fn deinit(ptr: *anyopaque) void {
+    _ = ptr;
+}
+
+pub fn decompressBlock(
+    decompressor: *anyopaque,
     in: []const u8,
     out: []u8,
 ) DecompressError!usize {
-    _ = allocator;
+    _ = decompressor;
 
     const ret = required_symbols.ZSTD_decompress(
         out.ptr,

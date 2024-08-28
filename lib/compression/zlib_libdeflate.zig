@@ -2,6 +2,11 @@ const std = @import("std");
 const compression = @import("../compression.zig");
 const DecompressError = compression.DecompressError;
 
+const Self = @This();
+
+allocator: std.mem.Allocator,
+internal_decompressor: LibdeflateDecompressor,
+
 pub const required_symbols = struct {
     pub var libdeflate_zlib_decompress: *const fn (
         *anyopaque,
@@ -13,19 +18,34 @@ pub const required_symbols = struct {
     ) callconv(.C) c_int = undefined;
 };
 
-pub fn decode(
-    allocator: std.mem.Allocator,
+pub fn init(allocator: std.mem.Allocator) *anyopaque {
+    const ptr = allocator.create(Self) catch unreachable;
+
+    ptr.* = .{
+        .allocator = allocator,
+        .internal_decompressor = LibdeflateDecompressor{},
+    };
+
+    return ptr;
+}
+
+pub fn deinit(ptr: *anyopaque) void {
+    const decompressor: *Self = @ptrCast(@alignCast(ptr));
+
+    decompressor.allocator.destroy(decompressor);
+}
+
+pub fn decompressBlock(
+    ptr: *anyopaque,
     in: []const u8,
     out: []u8,
 ) DecompressError!usize {
-    _ = allocator;
-
-    var decompressor = Decompressor{};
+    const decompressor: *Self = @ptrCast(@alignCast(ptr));
 
     var written: usize = undefined;
 
     const err = required_symbols.libdeflate_zlib_decompress(
-        &decompressor,
+        &decompressor.internal_decompressor,
         in.ptr,
         in.len,
         out.ptr,
@@ -56,7 +76,7 @@ const precode_enough = 128;
 const litlen_enough = 2342;
 const offset_enough = 402;
 
-const Decompressor = extern struct {
+const LibdeflateDecompressor = extern struct {
     _: extern union {
         precode_lens: [precode_syms]u8,
 

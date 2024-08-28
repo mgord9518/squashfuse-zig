@@ -12,24 +12,24 @@ pub fn build(b: *std.Build) !void {
     const static_fuse = b.option(bool, "static_fuse", "static link FUSE") orelse true;
     lib_options.addOption(bool, "static_fuse", static_fuse);
 
-    const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .libdeflate;
+    const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .zig_stdlib;
     lib_options.addOption(ZlibDecompressor, "zlib_decompressor", zlib_decompressor);
-    const static_zlib = b.option(bool, "static_zlib", "static link zlib") orelse true;
+    const static_zlib = b.option(bool, "static_zlib", "static link zlib") orelse false;
     lib_options.addOption(bool, "static_zlib", static_zlib);
 
-    const xz_decompressor = b.option(XzDecompressor, "xz_decompressor", "Decompressor to use for xz streams") orelse .liblzma;
+    const xz_decompressor = b.option(XzDecompressor, "xz_decompressor", "Decompressor to use for xz streams") orelse .zig_stdlib;
     lib_options.addOption(XzDecompressor, "xz_decompressor", xz_decompressor);
-    const static_xz = b.option(bool, "static_xz", "static link xz") orelse true;
+    const static_xz = b.option(bool, "static_xz", "static link xz") orelse false;
     lib_options.addOption(bool, "static_xz", static_xz);
 
     const lz4_decompressor = b.option(Lz4Decompressor, "lz4_decompressor", "Decompressor to use for lz4 streams") orelse .liblz4;
     lib_options.addOption(Lz4Decompressor, "lz4_decompressor", lz4_decompressor);
-    const static_lz4 = b.option(bool, "static_lz4", "static link liblz4") orelse true;
+    const static_lz4 = b.option(bool, "static_lz4", "static link liblz4") orelse false;
     lib_options.addOption(bool, "static_lz4", static_lz4);
 
-    const zstd_decompressor = b.option(ZstdDecompressor, "zstd_decompressor", "Decompressor to use for zstd streams") orelse .libzstd;
+    const zstd_decompressor = b.option(ZstdDecompressor, "zstd_decompressor", "Decompressor to use for zstd streams") orelse .zig_stdlib;
     lib_options.addOption(ZstdDecompressor, "zstd_decompressor", zstd_decompressor);
-    const static_zstd = b.option(bool, "static_zstd", "static link libzstd") orelse true;
+    const static_zstd = b.option(bool, "static_zstd", "static link libzstd") orelse false;
     lib_options.addOption(bool, "static_zstd", static_zstd);
 
     const target = b.standardTargetOptions(.{});
@@ -383,19 +383,16 @@ pub fn buildLibdeflate(
         .optimize = options.optimize,
     });
 
-    const c_files = &[_][]const u8{
-        "lib/adler32.c",
-        "lib/crc32.c",
-        "lib/deflate_decompress.c",
-        "lib/utils.c",
-        "lib/zlib_decompress.c",
-    };
-
-    for (c_files) |c_file| {
-        lib.addCSourceFile(.{
-            .file = libdeflate_dep.path(c_file),
-        });
-    }
+    lib.addCSourceFiles(.{
+        .root = libdeflate_dep.path("."),
+        .files = &.{
+            "lib/adler32.c",
+            "lib/crc32.c",
+            "lib/deflate_decompress.c",
+            "lib/utils.c",
+            "lib/zlib_decompress.c",
+        },
+    });
 
     const arch = options.target.result.cpu.arch;
 

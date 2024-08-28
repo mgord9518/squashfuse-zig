@@ -25,7 +25,7 @@ pub const SquashFsError = error{
 pub const SquashFs = struct {
     allocator: std.mem.Allocator,
     file: fs.File,
-    decompressFn: compression.Decompressor,
+    decompressor: compression.Decompressor,
     super_block: SuperBlock,
 
     id_table: Table(u32),
@@ -150,7 +150,8 @@ pub const SquashFs = struct {
         // TODO: XAttr support
         //try sqfs.XattrInit();
 
-        sqfs.decompressFn = try compression.getDecompressor(
+        sqfs.decompressor = try compression.getDecompressor(
+            allocator,
             sqfs.super_block.compression,
         );
 
@@ -178,6 +179,8 @@ pub const SquashFs = struct {
         sqfs.md_cache.deinit();
         sqfs.data_cache.deinit();
         sqfs.frag_cache.deinit();
+
+        sqfs.decompressor.deinit();
 
         sqfs.file.close();
 
@@ -529,14 +532,14 @@ fn blockReadIntoBuf(
     // after use
     scratch_buf: []u8,
 ) ![]u8 {
+    _ = allocator;
     var block_data = data.*;
 
     if (compressed) {
         try sqfs.file.seekTo(sqfs.opts.offset + pos);
         _ = try sqfs.file.readAll(scratch_buf[0..size]);
 
-        const written = try sqfs.decompressFn(
-            allocator,
+        const written = try sqfs.decompressor.decompressBlock(
             scratch_buf[0..size],
             block_data,
         );

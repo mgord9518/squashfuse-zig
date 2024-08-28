@@ -92,60 +92,101 @@ pub const Compression = enum(u16) {
     };
 };
 
-pub const Decompressor = *const fn (
-    allocator: std.mem.Allocator,
+pub const Decompressor = struct {
+    pub const VTable = struct {
+        ptr: *anyopaque,
+
+        decompressBlock: *const fn (
+            *anyopaque,
+            in: []const u8,
+            out: []u8,
+        ) DecompressError!usize,
+
+        deinit: *const fn (*anyopaque) void,
+    };
+
+    vtable: VTable,
+
+    pub fn init(T: type, allocator: std.mem.Allocator) Decompressor {
+        return .{
+            .vtable = .{
+                .ptr = T.init(allocator),
+                .decompressBlock = T.decompressBlock,
+                .deinit = T.deinit,
+            },
+        };
+    }
+
+    pub fn decompressBlock(decompressor: Decompressor, in: []const u8, out: []u8) DecompressError!usize {
+        return decompressor.vtable.decompressBlock(
+            decompressor.vtable.ptr,
+            in,
+            out,
+        );
+    }
+
+    pub fn deinit(decompressor: Decompressor) void {
+        return decompressor.vtable.deinit(decompressor.vtable.ptr);
+    }
+};
+
+pub const DecompressFn = *const fn (
+    decompressor: *anyopaque,
     in: []const u8,
     out: []u8,
 ) DecompressError!usize;
 
-pub fn getDecompressor(kind: Compression) SquashFsError!Decompressor {
+pub fn getDecompressor(allocator: std.mem.Allocator, kind: Compression) SquashFsError!Decompressor {
     switch (kind) {
         .zlib => {
+            const zlib_zig = @import("compression/zlib_zig.zig");
             const libdeflate = @import("compression/zlib_libdeflate.zig");
             const libz = @import("compression/zlib_libz.zig");
 
-            return switch (build_options.zlib_decompressor) {
-                .zig_stdlib => @import("compression/zlib_zig.zig").decode,
-                .libdeflate => blk: {
+            switch (build_options.zlib_decompressor) {
+                .zig_stdlib => {
+                    return Decompressor.init(zlib_zig, allocator);
+                },
+                .libdeflate => {
                     initDecompressionSymbol(libdeflate, .zlib, "libdeflate") catch return error.Error;
-
-                    break :blk libdeflate.decode;
+                    return Decompressor.init(libdeflate, allocator);
                 },
-                .libz => blk: {
+                .libz => {
                     initDecompressionSymbol(libz, .zlib, "libz") catch return error.Error;
-
-                    break :blk libz.decode;
+                    return Decompressor.init(libz, allocator);
                 },
-            };
+            }
         },
         .lzma, .lzo => return error.InvalidCompression,
         .xz => {
             if (build_options.xz_decompressor == .zig_stdlib) {
-                return @import("compression/xz_zig.zig").decode;
+                const xz_zig = @import("compression/xz_zig.zig");
+                return Decompressor.init(xz_zig, allocator);
             }
 
-            const libxz = @import("compression/xz_liblzma.zig");
-            initDecompressionSymbol(libxz, .xz, "liblzma") catch return error.Error;
+            const liblzma = @import("compression/xz_liblzma.zig");
+            initDecompressionSymbol(liblzma, .xz, "liblzma") catch return error.Error;
 
-            return libxz.decode;
+            return Decompressor.init(liblzma, allocator);
         },
         .lz4 => {
             const liblz4 = @import("compression/lz4_liblz4.zig");
             initDecompressionSymbol(liblz4, .lz4, "liblz4") catch return error.Error;
 
-            return liblz4.decode;
+            return Decompressor.init(liblz4, allocator);
         },
         .zstd => {
             if (build_options.zstd_decompressor == .zig_stdlib) {
-                return @import("compression/zstd_zig.zig").decode;
+                const zstd_zig = @import("compression/zstd_zig.zig");
+                return Decompressor.init(zstd_zig, allocator);
             }
 
             const libzstd = @import("compression/zstd_libzstd.zig");
             initDecompressionSymbol(libzstd, .zstd, "libzstd") catch return error.Error;
 
-            return libzstd.decode;
+            return Decompressor.init(libzstd, allocator);
         },
-        .none => return fakeDecode,
+        .none => return Decompressor.init(FakeDecoder, allocator),
         else => return error.InvalidCompression,
     }
 
@@ -216,12 +257,24 @@ fn initDecompressionSymbol(
     if (!found) return error.DynLibNotFound;
 }
 
-// Since the decompressor will never be called on uncompressed blocks,
-// just give a function that doesn't do anything
-pub fn fakeDecode(
-    _: std.mem.Allocator,
-    _: []const u8,
-    _: []u8,
-) DecompressError!usize {
-    unreachable;
-}
+pub const FakeDecoder = struct {
+    pub fn init(allocator: std.mem.Allocator) *anyopaque {
+        _ = allocator;
+
+        return undefined;
+    }
+
+    pub fn deinit(ptr: *anyopaque) void {
+        _ = ptr;
+    }
+
+    // The decompressor should never be called on uncompressed blocks so just
+    // crash here
+    pub fn decompressBlock(
+        _: *anyopaque,
+        _: []const u8,
+        _: []u8,
+    ) DecompressError!usize {
+        unreachable;
+    }
+};
