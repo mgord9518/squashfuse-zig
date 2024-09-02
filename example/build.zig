@@ -8,7 +8,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
 
-        .zlib_decompressor = .libz_dynamic,
+        //.zlib_decompressor = .libz_dynamic,
+        .zlib_decompressor = .libdeflate_static,
         .zstd_decompressor = .libzstd_static,
     });
 
@@ -31,7 +32,8 @@ pub fn build(b: *std.Build) void {
     // If a C-ABI compression library is used and isn't linked at runtime,
     // the libraries must be linked in the build script as well
     exe.linkLibrary(squashfuse_dep.artifact("zstd"));
-    exe.linkSystemLibrary("z");
+    exe.linkLibrary(squashfuse_dep.artifact("deflate"));
+    //exe.linkSystemLibrary("z");
 
     b.installArtifact(exe);
 }

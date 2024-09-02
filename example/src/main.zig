@@ -23,7 +23,7 @@ pub fn main() !void {
     var sqfs = try SquashFs.init(allocator, argv1, .{});
     defer sqfs.deinit();
 
-    try stdout.print("SqusahFS info:\n", .{});
+    try stdout.print("SquashFS info:\n", .{});
     try stdout.print("  compression: {s}\n", .{@tagName(sqfs.super_block.compression)});
     try stdout.print("  block size:  {d}\n", .{sqfs.super_block.block_size});
     try stdout.print("  inode count: {d}\n", .{sqfs.super_block.inode_count});

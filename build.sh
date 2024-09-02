@@ -21,10 +21,10 @@ zig build \
     -Doptimize="$OPTIMIZE" \
     -Dtarget="$ARCH-$OS-$LIBC" \
     -Dstrip=true \
-    -Dstatic_zlib=true \
-    -Dstatic_zstd=true \
-    -Dstatic_lz4=true \
-    -Dstatic_xz=true \
+    -Dzlib_decompressor=libdeflate_static \
+    -Dzstd_decompressor=libzstd_static \
+    -Dlz4_decompressor=liblz4_static \
+    -Dxz_decompressor=liblzma_static \
     -Denable_fuse="$enable_fuse" \
     -Dstatic_fuse=true
 

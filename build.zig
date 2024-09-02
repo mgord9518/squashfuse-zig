@@ -8,9 +8,7 @@ pub fn build(b: *std.Build) !void {
     lib_options.addOption(bool, "strip", strip);
 
     const enable_fuse = b.option(bool, "enable_fuse", "enable usersystem mounting (FUSE)") orelse true;
-    lib_options.addOption(bool, "enable_fuse", enable_fuse);
     const static_fuse = b.option(bool, "static_fuse", "static link FUSE") orelse true;
-    lib_options.addOption(bool, "static_fuse", static_fuse);
 
     const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .zig_stdlib;
     lib_options.addOption(ZlibDecompressor, "zlib_decompressor", zlib_decompressor);
@@ -65,21 +63,6 @@ pub fn build(b: *std.Build) !void {
     });
 
     if (enable_fuse) {
-        const os = target.result.os.tag;
-        if (os != .linux) {
-            const error_string = try std.fmt.allocPrint(
-                b.allocator,
-                \\FUSE support for {s} not yet implemented
-                \\please build with `-Denable_fuse=false`
-            ,
-                .{@tagName(os)},
-            );
-
-            // TODO: surely panic should be replaced with a better option
-            // here?
-            @panic(error_string);
-        }
-
         if (static_fuse) {
             exe.linkLibrary(fuse_dep.artifact("fuse"));
         } else {
