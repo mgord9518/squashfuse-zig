@@ -14,23 +14,15 @@ pub fn build(b: *std.Build) !void {
 
     const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .zig_stdlib;
     lib_options.addOption(ZlibDecompressor, "zlib_decompressor", zlib_decompressor);
-    const static_zlib = b.option(bool, "static_zlib", "static link zlib") orelse false;
-    lib_options.addOption(bool, "static_zlib", static_zlib);
 
     const xz_decompressor = b.option(XzDecompressor, "xz_decompressor", "Decompressor to use for xz streams") orelse .zig_stdlib;
     lib_options.addOption(XzDecompressor, "xz_decompressor", xz_decompressor);
-    const static_xz = b.option(bool, "static_xz", "static link xz") orelse false;
-    lib_options.addOption(bool, "static_xz", static_xz);
 
-    const lz4_decompressor = b.option(Lz4Decompressor, "lz4_decompressor", "Decompressor to use for lz4 streams") orelse .liblz4;
+    const lz4_decompressor = b.option(Lz4Decompressor, "lz4_decompressor", "Decompressor to use for lz4 streams") orelse .liblz4_dynlib;
     lib_options.addOption(Lz4Decompressor, "lz4_decompressor", lz4_decompressor);
-    const static_lz4 = b.option(bool, "static_lz4", "static link liblz4") orelse false;
-    lib_options.addOption(bool, "static_lz4", static_lz4);
 
     const zstd_decompressor = b.option(ZstdDecompressor, "zstd_decompressor", "Decompressor to use for zstd streams") orelse .zig_stdlib;
     lib_options.addOption(ZstdDecompressor, "zstd_decompressor", zstd_decompressor);
-    const static_zstd = b.option(bool, "static_zstd", "static link libzstd") orelse false;
-    lib_options.addOption(bool, "static_zstd", static_zstd);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -96,61 +88,69 @@ pub fn build(b: *std.Build) !void {
         }
     }
 
-    if (zlib_decompressor == .libdeflate and static_zlib) {
-        const lib = try buildLibdeflate(b, .{
-            .name = "deflate",
-            .target = target,
-            .optimize = optimize,
-            .strip = strip,
-        });
+    switch (zlib_decompressor) {
+        .libdeflate_static => {
+            const lib = try buildLibdeflate(b, .{
+                .name = "deflate",
+                .target = target,
+                .optimize = optimize,
+                .strip = strip,
+            });
 
-        b.installArtifact(lib);
-        exe.linkLibrary(lib);
+            b.installArtifact(lib);
+            exe.linkLibrary(lib);
+        },
+        .libdeflate_dynamic => exe.linkSystemLibrary("deflate"),
+        .libz_dynamic => exe.linkSystemLibrary("z"),
+        .libdeflate_dynlib, .libz_dynlib, .zig_stdlib => {},
     }
 
-    if (xz_decompressor == .liblzma and static_xz) {
-        const lib = try buildLiblzma(b, .{
-            .name = "lzma",
-            .target = target,
-            .optimize = optimize,
-            .strip = strip,
-        });
+    switch (xz_decompressor) {
+        .liblzma_static => {
+            const lib = try buildLiblzma(b, .{
+                .name = "lzma",
+                .target = target,
+                .optimize = optimize,
+                .strip = strip,
+            });
 
-        b.installArtifact(lib);
-        exe.linkLibrary(lib);
+            b.installArtifact(lib);
+            exe.linkLibrary(lib);
+        },
+        .liblzma_dynamic => exe.linkSystemLibrary("lzma"),
+        .liblzma_dynlib, .zig_stdlib => {},
     }
 
-    if (lz4_decompressor == .liblz4 and static_lz4) {
-        const lib = try buildLiblz4(b, .{
-            .name = "lz4",
-            .target = target,
-            .optimize = optimize,
-            .strip = strip,
-        });
+    switch (lz4_decompressor) {
+        .liblz4_static => {
+            const lib = try buildLiblz4(b, .{
+                .name = "lz4",
+                .target = target,
+                .optimize = optimize,
+                .strip = strip,
+            });
 
-        b.installArtifact(lib);
-        exe.linkLibrary(lib);
-    } else {
-        const lib = try buildLiblz4(b, .{
-            .name = "lz4",
-            .target = target,
-            .optimize = optimize,
-            .strip = strip,
-        });
-
-        b.installArtifact(lib);
+            b.installArtifact(lib);
+            exe.linkLibrary(lib);
+        },
+        .liblz4_dynamic => exe.linkSystemLibrary("lz4"),
+        .liblz4_dynlib => {},
     }
 
-    if (zstd_decompressor == .libzstd and static_zstd) {
-        const lib = try buildLibzstd(b, .{
-            .name = "zstd",
-            .target = target,
-            .optimize = optimize,
-            .strip = strip,
-        });
+    switch (zstd_decompressor) {
+        .libzstd_static => {
+            const lib = try buildLibzstd(b, .{
+                .name = "zstd",
+                .target = target,
+                .optimize = optimize,
+                .strip = strip,
+            });
 
-        b.installArtifact(lib);
-        exe.linkLibrary(lib);
+            b.installArtifact(lib);
+            exe.linkLibrary(lib);
+        },
+        .libzstd_dynamic => exe.linkSystemLibrary("zstd"),
+        .libzstd_dynlib, .zig_stdlib => {},
     }
 
     exe.root_module.addImport("squashfuse", squashfuse_module);
@@ -483,20 +483,29 @@ pub fn buildLibzstd(
 
 const ZlibDecompressor = enum {
     zig_stdlib,
-    libdeflate,
-    libz,
+    libdeflate_dynamic,
+    libdeflate_dynlib,
+    libdeflate_static,
+    libz_dynlib,
+    libz_dynamic,
 };
 
 const XzDecompressor = enum {
     zig_stdlib,
-    liblzma,
+    liblzma_dynamic,
+    liblzma_dynlib,
+    liblzma_static,
 };
 
 const ZstdDecompressor = enum {
     zig_stdlib,
-    libzstd,
+    libzstd_dynamic,
+    libzstd_dynlib,
+    libzstd_static,
 };
 
 const Lz4Decompressor = enum {
-    liblz4,
+    liblz4_dynamic,
+    liblz4_dynlib,
+    liblz4_static,
 };

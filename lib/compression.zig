@@ -144,47 +144,71 @@ pub fn getDecompressor(allocator: std.mem.Allocator, kind: Compression) SquashFs
             const libz = @import("compression/zlib_libz.zig");
 
             switch (build_options.zlib_decompressor) {
-                .zig_stdlib => {
-                    return Decompressor.init(zlib_zig, allocator);
-                },
-                .libdeflate => {
-                    initDecompressionSymbol(libdeflate, .zlib, "libdeflate") catch return error.Error;
+                .zig_stdlib => return Decompressor.init(zlib_zig, allocator),
+                .libdeflate_static, .libdeflate_dynamic => {
+                    initDecompressionSymbolStatic(libdeflate) catch return error.Error;
                     return Decompressor.init(libdeflate, allocator);
                 },
-                .libz => {
-                    initDecompressionSymbol(libz, .zlib, "libz") catch return error.Error;
+                .libdeflate_dynlib => {
+                    initDecompressionSymbolDynlib(libdeflate, "libdeflate") catch return error.Error;
+                    return Decompressor.init(libdeflate, allocator);
+                },
+                .libz_dynamic => {
+                    initDecompressionSymbolStatic(libz) catch return error.Error;
+                    return Decompressor.init(libz, allocator);
+                },
+                .libz_dynlib => {
+                    initDecompressionSymbolDynlib(libz, "libz") catch return error.Error;
                     return Decompressor.init(libz, allocator);
                 },
             }
         },
         .lzma, .lzo => return error.InvalidCompression,
         .xz => {
-            if (build_options.xz_decompressor == .zig_stdlib) {
-                const xz_zig = @import("compression/xz_zig.zig");
-                return Decompressor.init(xz_zig, allocator);
-            }
-
+            const xz_zig = @import("compression/xz_zig.zig");
             const liblzma = @import("compression/xz_liblzma.zig");
-            initDecompressionSymbol(liblzma, .xz, "liblzma") catch return error.Error;
 
-            return Decompressor.init(liblzma, allocator);
+            switch (build_options.xz_decompressor) {
+                .zig_stdlib => return Decompressor.init(xz_zig, allocator),
+                .liblzma_static, .liblzma_dynamic => {
+                    initDecompressionSymbolStatic(liblzma) catch return error.Error;
+                    return Decompressor.init(liblzma, allocator);
+                },
+                .liblzma_dynlib => {
+                    initDecompressionSymbolDynlib(liblzma, "liblzma") catch return error.Error;
+                    return Decompressor.init(liblzma, allocator);
+                },
+            }
         },
         .lz4 => {
             const liblz4 = @import("compression/lz4_liblz4.zig");
-            initDecompressionSymbol(liblz4, .lz4, "liblz4") catch return error.Error;
+
+            switch (build_options.lz4_decompressor) {
+                .liblz4_static, .liblz4_dynamic => {
+                    initDecompressionSymbolStatic(liblz4) catch return error.Error;
+                },
+                .liblz4_dynlib => {
+                    initDecompressionSymbolDynlib(liblz4, "liblz4") catch return error.Error;
+                },
+            }
 
             return Decompressor.init(liblz4, allocator);
         },
         .zstd => {
-            if (build_options.zstd_decompressor == .zig_stdlib) {
-                const zstd_zig = @import("compression/zstd_zig.zig");
-                return Decompressor.init(zstd_zig, allocator);
-            }
-
+            const zstd_zig = @import("compression/zstd_zig.zig");
             const libzstd = @import("compression/zstd_libzstd.zig");
-            initDecompressionSymbol(libzstd, .zstd, "libzstd") catch return error.Error;
 
-            return Decompressor.init(libzstd, allocator);
+            switch (build_options.zstd_decompressor) {
+                .zig_stdlib => return Decompressor.init(zstd_zig, allocator),
+                .libzstd_static, .libzstd_dynamic => {
+                    initDecompressionSymbolStatic(libzstd) catch return error.Error;
+                    return Decompressor.init(libzstd, allocator);
+                },
+                .libzstd_dynlib => {
+                    initDecompressionSymbolDynlib(libzstd, "libzstd") catch return error.Error;
+                    return Decompressor.init(libzstd, allocator);
+                },
+            }
         },
         .none => return Decompressor.init(FakeDecoder, allocator),
         else => return error.InvalidCompression,
@@ -201,29 +225,28 @@ pub fn builtWithDecompression(comptime compression: Compression) bool {
     return @hasDecl(build_options, decl_name) and @field(build_options, decl_name);
 }
 
+fn initDecompressionSymbolStatic(
+    comptime T: type,
+) !void {
+    inline for (@typeInfo(T.required_symbols).Struct.decls) |decl| {
+        @field(T.required_symbols, decl.name) = @extern(
+            @TypeOf(@field(T.required_symbols, decl.name)),
+            .{ .name = decl.name },
+        );
+    }
+
+    return;
+}
+
 // Initializes decompression function pointers for C-ABI compression libs
 // If `static_[DECOMPRESSOR]` is not given, an attempt will be made to
 // dlload the library from the system
-fn initDecompressionSymbol(
+fn initDecompressionSymbolDynlib(
     comptime T: type,
-    comptime compression: Compression,
     comptime library_name: []const u8,
 ) !void {
-    if (comptime builtWithDecompression(compression)) {
-        inline for (@typeInfo(T.required_symbols).Struct.decls) |decl| {
-            @field(T.required_symbols, decl.name) = @extern(
-                @TypeOf(@field(T.required_symbols, decl.name)),
-                .{ .name = decl.name },
-            );
-        }
-
-        return;
-    }
-
     var found = false;
 
-    // Looks like it wasn't statically linked, attempt to find the library on
-    // the system
     inline for (.{
         "/lib/{s}.so.1",
         "/lib64/{s}.so.1",

@@ -188,7 +188,8 @@ fn testRead(sqfs: *SquashFs) !void {
     // The entry should never be null because the walk test checks that
     // all files are found
     var inode = file_tree_hashmap.get("1/TEST").?.inode();
-    var read_bytes = try inode.read(&buf);
+    var file = SquashFs.File.initFromInode(&inode);
+    var read_bytes = try file.read(&buf);
     try expect(std.mem.eql(u8, buf[0..read_bytes], "TEST"));
 
     inode = file_tree_hashmap.get("2/another dir/sparse_file").?.inode();
@@ -200,7 +201,8 @@ fn testRead(sqfs: *SquashFs) !void {
     ));
 
     inode = file_tree_hashmap.get("2/text").?.inode();
-    read_bytes = try inode.read(&buf);
+    file = SquashFs.File.initFromInode(&inode);
+    read_bytes = try file.read(&buf);
     try expect(std.mem.eql(
         u8,
         buf[0..read_bytes],

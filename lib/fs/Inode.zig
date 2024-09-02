@@ -40,10 +40,8 @@ pub const TableEntry = packed struct(u64) {
     _: u16 = 0,
 };
 
-fn fragBlock(
+pub fn fragBlock(
     inode: *Inode,
-    offset: *u64,
-    size: *u64,
 ) ![]u8 {
     var sqfs = inode.parent;
 
@@ -61,10 +59,10 @@ fn fragBlock(
         frag.block_header,
     );
 
-    offset.* = inode.xtra.reg.frag_off;
-    size.* = inode.xtra.reg.size % sqfs.super_block.block_size;
+    const offset = inode.xtra.reg.frag_off;
+    const size = inode.xtra.reg.size % sqfs.super_block.block_size;
 
-    return block_data;
+    return block_data[offset..][0..size];
 }
 
 /// Reads the link target into `buf`
@@ -94,7 +92,7 @@ pub fn readLinkZ(self: *Inode, buf: []u8) ![:0]const u8 {
     return buf[0..link_target.len :0];
 }
 
-// TODO: Move these to `SquashFs.File`
+// TODO: Remove read functions
 pub const ReadError = std.fs.File.ReadError;
 pub fn read(self: *Inode, buf: []u8) ReadError!usize {
     const buf_len = try self.pread(
@@ -126,10 +124,17 @@ pub fn pread(
     if (offset == file_size) return 0;
 
     // TODO: investigate performance on large files
-    var block_list = SquashFs.File.BlockList.init(
-        sqfs,
+    var block_list = SquashFs.File.BlockListIterator.init(
         inode,
-    ) catch return error.InputOutput;
+    );
+
+    // Fast-forward to target block
+    const block = offset / block_size;
+    while (block_list.idx < block) {
+        //std.debug.print("skip block {d}\n", .{block_list.idx});
+        const maybe_entry = block_list.next() catch return error.SystemResources;
+        if (maybe_entry == null) break;
+    }
 
     var read_off: usize = @intCast(offset % block_size);
 
@@ -140,18 +145,20 @@ pub fn pread(
 
         const maybe_entry = block_list.next() catch return error.SystemResources;
         if (maybe_entry) |entry| {
-            if (block_list.pos + block_size <= offset) continue;
+            if (block_list.idx * block_size <= offset) continue;
 
             data_off = 0;
             if (entry.size == 0) {
+                // TODO
                 data_size = @min(
-                    file_size - block_list.pos,
+                    file_size - (block_list.idx * block_size),
                     block_size,
                 );
+                data_size = block_size;
             } else {
                 block_data = sqfs.dataCache(
                     &sqfs.data_cache,
-                    block_list.block - entry.size,
+                    block_list.block_offset - entry.size,
                     entry,
                 ) catch return error.SystemResources;
 
@@ -161,10 +168,8 @@ pub fn pread(
             // Fragment
             if (inode.xtra.reg.frag_idx == SquashFs.invalid_frag) break;
 
-            block_data = inode.fragBlock(
-                &data_off,
-                &data_size,
-            ) catch return error.SystemResources;
+            block_data = inode.fragBlock() catch return error.SystemResources;
+            data_size = block_data.?.len;
         }
 
         const take = @min(
@@ -175,7 +180,8 @@ pub fn pread(
         if (block_data) |b| {
             @memcpy(
                 nbuf[0..take],
-                b[@intCast(data_off + read_off)..][0..take],
+                //b[@intCast(data_off + read_off)..][0..take],
+                b[@intCast(read_off)..][0..take],
             );
         } else {
             // Sparse block
@@ -518,6 +524,7 @@ pub const Walker = struct {
 
 /// Extracts an inode from the SquashFS image to `dest` using the buffer
 pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
+    _ = buf;
     const cwd = fs.cwd();
 
     switch (self.kind) {
@@ -525,14 +532,14 @@ pub fn extract(self: *Inode, buf: []u8, dest: []const u8) !void {
             var f = try cwd.createFile(dest, .{});
             defer f.close();
 
-            var off: usize = 0;
+            var file = SquashFs.File.initFromInode(self);
+
             const fsize: u64 = self.xtra.reg.size;
 
-            while (off < fsize) {
-                const read_bytes = try self.read(buf);
-                off += read_bytes;
-
-                _ = try f.write(buf[0..read_bytes]);
+            while (file.pos < fsize) {
+                const block = try file.preadNoCopy(file.pos);
+                _ = try f.write(block);
+                file.pos += block.len;
             }
 
             // Change the mode of the file to match the inode contained

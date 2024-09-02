@@ -47,15 +47,15 @@ jobs:
 
     - name: Test
       run: |
-        zig build test -Dstatic_lz4=true
-        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
-        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
-        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall
+        zig build test -Dlz4_decompressor=liblz4_static
+        zig build test -Dlz4_decompressor=liblz4_static -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
+        zig build test -Dlz4_decompressor=liblz4_static -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
+        zig build test -Dlz4_decompressor=liblz4_static -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSmall
 
-        zig build test -Dstatic_lz4=true
-        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
-        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
-        zig build test -Dstatic_lz4=true -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSmall
+        zig build test -Dlz4_decompressor=liblz4_static 
+        zig build test -Dlz4_decompressor=liblz4_static -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+        zig build test -Dlz4_decompressor=liblz4_static -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
+        zig build test -Dlz4_decompressor=liblz4_static -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSmall
 
     - name: Upload build
       uses: "marvinpinto/action-automatic-releases@latest"

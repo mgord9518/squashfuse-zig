@@ -1,3 +1,5 @@
+// TODO: refactor this file
+
 const std = @import("std");
 const fmt = std.fmt;
 const io = std.io;
@@ -521,6 +523,7 @@ fn extractArchive(
 
         var inode = entry.inode();
         inode.extract(buf, prefixed_dest) catch |err| {
+            //inode.extract(buf, prefixed_dest) catch unreachable;
             std.debug.print("extract error: {!}\n", .{err});
         };
     }

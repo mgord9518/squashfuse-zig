@@ -42,6 +42,8 @@ pub const SquashFs = struct {
     xattr_info: XattrIdTable,
     //compression_options: Compression.Options,
 
+    zero_block: []u8,
+
     opts: SquashFs.Options,
 
     pub const SuperBlock = @import("super_block.zig").SuperBlock;
@@ -86,6 +88,9 @@ pub const SquashFs = struct {
             SuperBlock,
             .little,
         );
+
+        sqfs.zero_block = try allocator.alloc(u8, sqfs.super_block.block_size);
+        @memset(sqfs.zero_block, 0);
 
         if (!std.mem.eql(u8, &sqfs.super_block.magic, SquashFs.magic)) {
             return SquashFsError.InvalidFormat;
@@ -181,6 +186,8 @@ pub const SquashFs = struct {
         sqfs.frag_cache.deinit();
 
         sqfs.decompressor.deinit();
+
+        sqfs.allocator.free(sqfs.zero_block);
 
         sqfs.file.close();
 
