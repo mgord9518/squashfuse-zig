@@ -13,7 +13,7 @@ const ls_colors = @import("ls_colors.zig");
 
 const S = std.os.linux.S;
 
-pub const build_options = squashfuse.build_options;
+const build_options = @import("build_options");
 
 const FuseOperations = @import("fuse_operations.zig").FuseOperations;
 

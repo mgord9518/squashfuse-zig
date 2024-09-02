@@ -2,28 +2,33 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
     const lib_options = b.addOptions();
+    const exe_options = b.addOptions();
 
     const strip = b.option(bool, "strip", "remove debug symbols from executable") orelse false;
     lib_options.addOption(bool, "strip", strip);
 
-    const enable_fuse = b.option(bool, "enable_fuse", "enable usersystem mounting (FUSE)") orelse true;
+    const enable_fuse = b.option(bool, "enable_fuse", "enable usersystem mounting (FUSE)") orelse switch (target.result.os.tag) {
+        .linux => true,
+        else => false,
+    };
+    exe_options.addOption(bool, "enable_fuse", enable_fuse);
     const static_fuse = b.option(bool, "static_fuse", "static link FUSE") orelse true;
 
-    const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .zig_stdlib;
-    lib_options.addOption(ZlibDecompressor, "zlib_decompressor", zlib_decompressor);
+    const zlib_decompressor = b.option(ZlibDecompressor, "zlib_decompressor", "Decompressor to use for zlib streams") orelse .libdeflate_static;
+    lib_options.addOption(ZlibDecompressor, "zlib_decompressor", .zig_stdlib);
 
-    const xz_decompressor = b.option(XzDecompressor, "xz_decompressor", "Decompressor to use for xz streams") orelse .zig_stdlib;
-    lib_options.addOption(XzDecompressor, "xz_decompressor", xz_decompressor);
+    const xz_decompressor = b.option(XzDecompressor, "xz_decompressor", "Decompressor to use for xz streams") orelse .liblzma_static;
+    lib_options.addOption(XzDecompressor, "xz_decompressor", .zig_stdlib);
 
-    const lz4_decompressor = b.option(Lz4Decompressor, "lz4_decompressor", "Decompressor to use for lz4 streams") orelse .liblz4_dynlib;
-    lib_options.addOption(Lz4Decompressor, "lz4_decompressor", lz4_decompressor);
+    const lz4_decompressor = b.option(Lz4Decompressor, "lz4_decompressor", "Decompressor to use for lz4 streams") orelse .liblz4_static;
+    lib_options.addOption(Lz4Decompressor, "lz4_decompressor", .liblz4_dynlib);
 
-    const zstd_decompressor = b.option(ZstdDecompressor, "zstd_decompressor", "Decompressor to use for zstd streams") orelse .zig_stdlib;
-    lib_options.addOption(ZstdDecompressor, "zstd_decompressor", zstd_decompressor);
-
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const zstd_decompressor = b.option(ZstdDecompressor, "zstd_decompressor", "Decompressor to use for zstd streams") orelse .libzstd_static;
+    lib_options.addOption(ZstdDecompressor, "zstd_decompressor", .zig_stdlib);
 
     const exe = b.addExecutable(.{
         .name = "squashfuse",
@@ -137,6 +142,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     exe.root_module.addImport("squashfuse", squashfuse_module);
+    exe.root_module.addImport("build_options", exe_options.createModule());
     exe.root_module.addImport("fuse", fuse_module);
     exe.root_module.addImport("clap", clap_module);
 
