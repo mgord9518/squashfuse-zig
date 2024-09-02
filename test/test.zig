@@ -46,15 +46,6 @@ test "Dir.walk" {
 
         var idx: usize = 0;
         while (try walker.next()) |entry| : (idx += 1) {
-            //            std.debug.print("a {d} {x}\n", .{
-            //                entry.path.len,
-            //                entry.path,
-            //            });
-            //            std.log.log("b {d} {x}\n", .{
-            //                file_tree[idx].len,
-            //                file_tree[idx],
-            //            });
-
             try expect(std.mem.eql(
                 u8,
                 entry.path,
