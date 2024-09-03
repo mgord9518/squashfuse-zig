@@ -38,6 +38,13 @@ pub fn build(b: *std.Build) !void {
         .strip = strip,
     });
 
+    const unit_tests = b.addTest(.{
+        .root_source_file = b.path("test/test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip,
+    });
+
     const squashfuse_module = b.addModule("squashfuse", .{
         .root_source_file = b.path("lib/root.zig"),
         .imports = &.{
@@ -87,9 +94,16 @@ pub fn build(b: *std.Build) !void {
 
             b.installArtifact(lib);
             exe.linkLibrary(lib);
+            unit_tests.linkLibrary(lib);
         },
-        .libdeflate_dynamic => exe.linkSystemLibrary("deflate"),
-        .libz_dynamic => exe.linkSystemLibrary("z"),
+        .libdeflate_dynamic => {
+            exe.linkSystemLibrary("deflate");
+            unit_tests.linkSystemLibrary("deflate");
+        },
+        .libz_dynamic => {
+            exe.linkSystemLibrary("z");
+            unit_tests.linkSystemLibrary("z");
+        },
         .libdeflate_dynlib, .libz_dynlib, .zig_stdlib => {},
     }
 
@@ -104,8 +118,12 @@ pub fn build(b: *std.Build) !void {
 
             b.installArtifact(lib);
             exe.linkLibrary(lib);
+            unit_tests.linkLibrary(lib);
         },
-        .liblzma_dynamic => exe.linkSystemLibrary("lzma"),
+        .liblzma_dynamic => {
+            exe.linkSystemLibrary("lzma");
+            unit_tests.linkSystemLibrary("lzma");
+        },
         .liblzma_dynlib, .zig_stdlib => {},
     }
 
@@ -120,8 +138,12 @@ pub fn build(b: *std.Build) !void {
 
             b.installArtifact(lib);
             exe.linkLibrary(lib);
+            unit_tests.linkLibrary(lib);
         },
-        .liblz4_dynamic => exe.linkSystemLibrary("lz4"),
+        .liblz4_dynamic => {
+            exe.linkSystemLibrary("lz4");
+            unit_tests.linkSystemLibrary("lz4");
+        },
         .liblz4_dynlib => {},
     }
 
@@ -136,8 +158,12 @@ pub fn build(b: *std.Build) !void {
 
             b.installArtifact(lib);
             exe.linkLibrary(lib);
+            unit_tests.linkLibrary(lib);
         },
-        .libzstd_dynamic => exe.linkSystemLibrary("zstd"),
+        .libzstd_dynamic => {
+            exe.linkSystemLibrary("zstd");
+            unit_tests.linkSystemLibrary("zstd");
+        },
         .libzstd_dynlib, .zig_stdlib => {},
     }
 
@@ -145,6 +171,8 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("build_options", exe_options.createModule());
     exe.root_module.addImport("fuse", fuse_module);
     exe.root_module.addImport("clap", clap_module);
+
+    unit_tests.root_module.addImport("squashfuse", squashfuse_module);
 
     b.installArtifact(exe);
 
@@ -156,39 +184,6 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    const unit_tests = b.addTest(.{
-        .root_source_file = b.path("test/test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .strip = strip,
-    });
-
-    unit_tests.root_module.addImport("squashfuse", squashfuse_module);
-
-    unit_tests.linkLibrary(try buildLibdeflate(b, .{
-        .name = "deflate",
-        .target = target,
-        .optimize = optimize,
-    }));
-
-    unit_tests.linkLibrary(try buildLiblzma(b, .{
-        .name = "lzma",
-        .target = target,
-        .optimize = optimize,
-    }));
-
-    unit_tests.linkLibrary(try buildLiblz4(b, .{
-        .name = "lz4",
-        .target = target,
-        .optimize = optimize,
-    }));
-
-    unit_tests.linkLibrary(try buildLibzstd(b, .{
-        .name = "zstd",
-        .target = target,
-        .optimize = optimize,
-    }));
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
