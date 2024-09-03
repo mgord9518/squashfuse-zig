@@ -16,8 +16,10 @@ const compression_algos = &.{
 };
 
 test "Dir.openDir" {
-    var sqfs = try SquashFs.init(allocator, "test/tree_zlib.sqfs", .{});
-    defer sqfs.deinit();
+    const file = try std.fs.cwd().openFile("test/tree_zlib.sqfs", .{});
+    defer file.close();
+    var sqfs = try SquashFs.open(allocator, file, .{});
+    defer sqfs.close();
 
     var root_dir = sqfs.root();
     defer root_dir.close();
@@ -36,8 +38,10 @@ test "Dir.walk" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-        var sqfs = try SquashFs.init(allocator, file_path, .{});
-        defer sqfs.deinit();
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        var sqfs = try SquashFs.open(allocator, file, .{});
+        defer sqfs.close();
 
         var root = sqfs.root();
 
@@ -62,8 +66,10 @@ test "SquashFs.Inode.walk" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-        var sqfs = try SquashFs.init(allocator, file_path, .{});
-        defer sqfs.deinit();
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        var sqfs = try SquashFs.open(allocator, file, .{});
+        defer sqfs.close();
 
         var root_inode = sqfs.getRootInode();
 
@@ -87,8 +93,10 @@ test "Inode.Stat" {
             .{algo},
         );
 
-        var sqfs = try SquashFs.init(allocator, file_path, .{});
-        defer sqfs.deinit();
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        var sqfs = try SquashFs.open(allocator, file, .{});
+        defer sqfs.close();
 
         var root_inode = sqfs.getRootInode();
 
@@ -114,8 +122,10 @@ test "devices" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-        var sqfs = try SquashFs.init(allocator, file_path, .{});
-        defer sqfs.deinit();
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        var sqfs = try SquashFs.open(allocator, file, .{});
+        defer sqfs.close();
 
         var root_inode = sqfs.getRootInode();
 
@@ -205,8 +215,10 @@ test "read" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-        var sqfs = try SquashFs.init(allocator, file_path, .{});
-        defer sqfs.deinit();
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        var sqfs = try SquashFs.open(allocator, file, .{});
+        defer sqfs.close();
 
         try testRead(sqfs);
     }
@@ -216,8 +228,10 @@ test "read link" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
-        var sqfs = try SquashFs.init(allocator, file_path, .{});
-        defer sqfs.deinit();
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+        var sqfs = try SquashFs.open(allocator, file, .{});
+        defer sqfs.close();
 
         var root_inode = sqfs.getRootInode();
 
