@@ -16,7 +16,7 @@ jobs:
     - name: Install deps
       run: |
         sudo apt update
-        sudo apt install squashfs-tools zip liblz4
+        sudo apt install squashfs-tools zip liblz4-1
 
     - name: Build (Linux, Musl libc, static, x86_64)
       run: ARCH=x86_64 OS=linux LIBC=musl ./build.sh
