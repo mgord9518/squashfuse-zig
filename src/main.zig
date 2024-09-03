@@ -245,6 +245,13 @@ pub fn main() !void {
         }
     }
 
+    var file: ?std.fs.File = null;
+    defer {
+        if (file) |f| {
+            f.close();
+        }
+    }
+
     for (res.positionals, 0..) |arg, idx| {
         // Open the SquashFS image in the first positional argument
         if (idx == 0) {
@@ -252,15 +259,30 @@ pub fn main() !void {
                 offset = o;
             }
 
-            sqfs = SquashFs.init(allocator, arg, .{
+            const cwd = std.fs.cwd();
+            file = cwd.openFile(arg, .{}) catch |err| {
+                const error_string = switch (err) {
+                    error.FileNotFound => try std.fmt.allocPrint(allocator, "file `{s}` not found", .{arg}),
+                    error.AccessDenied => "permission denied",
+                    error.IsDir => "attempted to open directory as SquashFS image",
+                    else => return err,
+                };
+
+                try stderr.print("{s}::{s} failed to read image: {s}\n", .{
+                    red,
+                    reset,
+                    error_string,
+                });
+
+                posix.exit(1);
+            };
+
+            sqfs = SquashFs.open(allocator, file.?, .{
                 .offset = offset,
             }) catch |err| {
                 const error_string = switch (err) {
                     error.InvalidCompression => "unsupported compression algorithm",
                     error.InvalidFormat => "unknown file type, doesn't look like a SquashFS image",
-                    error.FileNotFound => try std.fmt.allocPrint(allocator, "file `{s}` not found", .{arg}),
-                    error.AccessDenied => "permission denied",
-                    error.IsDir => "attempted to open directory as SquashFS image",
                     else => return err,
                 };
 
@@ -297,7 +319,7 @@ pub fn main() !void {
 
     const file_tree = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
     FuseOperations.squash = FuseOperations.Squash{ .image = sqfs, .file_tree = file_tree };
-    defer sqfs.deinit();
+    defer sqfs.close();
 
     var extract_args_len: usize = 0;
     for (res.args.extract) |_| {

@@ -71,9 +71,9 @@ pub const SquashFs = struct {
         cached_fragment_blocks: usize = 3,
     };
 
-    pub fn init(
+    pub fn open(
         allocator: std.mem.Allocator,
-        path: []const u8,
+        file: std.fs.File,
         opts: Options,
     ) !*SquashFs {
         const sqfs = try allocator.create(SquashFs);
@@ -81,7 +81,7 @@ pub const SquashFs = struct {
         sqfs.inode_map = null;
         sqfs.opts = opts;
         sqfs.allocator = allocator;
-        sqfs.file = try fs.cwd().openFile(path, .{});
+        sqfs.file = file;
 
         try sqfs.file.seekTo(opts.offset);
         sqfs.super_block = try sqfs.file.reader().readStructEndian(
@@ -163,7 +163,7 @@ pub const SquashFs = struct {
         return sqfs;
     }
 
-    pub fn deinit(sqfs: *SquashFs) void {
+    pub fn close(sqfs: *SquashFs) void {
         sqfs.id_table.deinit();
         sqfs.frag_table.deinit();
 
@@ -188,8 +188,6 @@ pub const SquashFs = struct {
         sqfs.decompressor.deinit();
 
         sqfs.allocator.free(sqfs.zero_block);
-
-        sqfs.file.close();
 
         sqfs.allocator.destroy(sqfs);
     }
@@ -390,6 +388,7 @@ pub const SquashFs = struct {
         const scratch_buf = sqfs.md_cache.getCompressedDataBuf().?;
 
         const block = sqfs.md_cache.get(pos.*) orelse blk: {
+            // TODO: use pread
             try sqfs.file.seekTo(sqfs.opts.offset + pos.*);
             const header: Block.MetadataEntry = @bitCast(try sqfs.file.reader().readInt(
                 u16,

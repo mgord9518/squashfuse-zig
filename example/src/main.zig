@@ -16,12 +16,15 @@ pub fn main() !void {
         return;
     };
 
+    const cwd = std.fs.cwd();
+    const file = try cwd.openFile(argv1, .{});
+
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    var sqfs = try SquashFs.init(allocator, argv1, .{});
-    defer sqfs.deinit();
+    var sqfs = try SquashFs.open(allocator, file, .{});
+    defer sqfs.close();
 
     try stdout.print("SquashFS info:\n", .{});
     try stdout.print("  compression: {s}\n", .{@tagName(sqfs.super_block.compression)});
