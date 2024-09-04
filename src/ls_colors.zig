@@ -6,10 +6,12 @@ const SquashFs = squashfuse.SquashFs;
 
 const S = std.os.linux.S;
 
-pub fn getEntryColor(entry: SquashFs.Inode.Walker.Entry, colors: []const u8, color_buf: []u8) ![]const u8 {
+pub fn getEntryColor(entry: SquashFs.Dir.Walker.Entry, colors: []const u8, color_buf: []u8) ![]const u8 {
     //_ = env_map.get("LS_COLORS") orelse return reset;
 
-    var inode = entry.inode();
+    var inode = entry.dir.sqfs.getInode(
+        entry.id,
+    ) catch unreachable;
 
     const st = try inode.statC();
 

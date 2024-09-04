@@ -9,18 +9,19 @@ pub const FuseOperations = struct {
     // Struct for holding our FUSE info
     pub const Squash = struct {
         image: *SquashFs,
-        file_tree: std.StringArrayHashMap(SquashFs.Inode.Walker.Entry),
+        file_tree: std.StringArrayHashMap(SquashFs.Dir.Walker.Entry),
+        open_files: std.AutoHashMap(u64, SquashFs.File),
     };
 
     pub var squash: Squash = undefined;
 
-    pub fn read(path: [:0]const u8, buf: []u8, offset: u64, _: *fuse.FileInfo) fuse.MountError!usize {
-        var entry = squash.file_tree.get(path[0..]) orelse return fuse.MountError.NoEntry;
-        var inode = entry.inode();
-        inode.seekTo(offset) catch return fuse.MountError.Io;
+    pub fn read(path: [:0]const u8, buf: []u8, offset: u64, fi: *fuse.FileInfo) fuse.MountError!usize {
+        _ = squash.file_tree.get(path) orelse return error.NoEntry;
 
-        const read_bytes = inode.read(buf) catch |err| {
-            std.debug.print("ERROR: {!}\n", .{err});
+        var file = squash.open_files.get(fi.handle) orelse return error.InvalidArgument;
+
+        const read_bytes = file.pread(buf, offset) catch |err| {
+            std.debug.print("squashfuse-zig error: {!}\n", .{err});
             return fuse.MountError.Io;
         };
 
@@ -28,27 +29,27 @@ pub const FuseOperations = struct {
     }
 
     pub fn create(_: [:0]const u8, _: std.fs.File.Mode, _: *fuse.FileInfo) fuse.MountError!void {
-        return fuse.MountError.ReadOnly;
+        return error.ReadOnly;
     }
 
     pub fn openDir(path: [:0]const u8, fi: *fuse.FileInfo) fuse.MountError!void {
         if (std.mem.eql(u8, path, "/")) {
-            var inode = squash.image.getRootInode();
-
-            fi.handle = @intFromPtr(&inode);
+            fi.handle = @bitCast(squash.image.super_block.root_inode_id);
 
             return;
         }
 
-        var entry = squash.file_tree.get(path[0..]) orelse return fuse.MountError.NoEntry;
-        var inode = entry.inode();
+        const entry = squash.file_tree.get(path[0..]) orelse return fuse.MountError.NoEntry;
 
-        if (entry.kind != .directory) return fuse.MountError.NotDir;
-
-        fi.handle = @intFromPtr(&inode);
+        fi.handle = @bitCast(entry.id);
     }
 
     pub fn release(_: [:0]const u8, fi: *fuse.FileInfo) fuse.MountError!void {
+        var file = squash.open_files.get(fi.handle) orelse return error.NoEntry;
+        file.close();
+
+        _ = squash.open_files.remove(fi.handle);
+
         fi.handle = 0;
     }
 
@@ -100,8 +101,10 @@ pub const FuseOperations = struct {
     }
 
     pub fn readLink(path: [:0]const u8, buf: []u8) fuse.MountError![]const u8 {
-        var entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
-        var inode = entry.inode();
+        const entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
+        var inode = squash.image.getInode(
+            entry.id,
+        ) catch unreachable;
 
         if (entry.kind != .sym_link) return fuse.MountError.InvalidArgument;
 
@@ -109,16 +112,17 @@ pub const FuseOperations = struct {
     }
 
     pub fn open(path: [:0]const u8, fi: *fuse.FileInfo) fuse.MountError!void {
-        const entry = squash.file_tree.get(path) orelse {
-            return fuse.MountError.NoEntry;
-        };
+        const entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
 
-        if (entry.kind == .directory) {
-            return fuse.MountError.IsDir;
-        }
+        const file = SquashFs.File.initFromInode(
+            squash.image.getInode(
+                entry.id,
+            ) catch unreachable,
+        );
 
-        fi.handle = @intFromPtr(&entry.inode());
-        fi.keep_cache = true;
+        fi.handle = @bitCast(entry.id);
+
+        _ = squash.open_files.put(fi.handle, file) catch unreachable;
     }
 
     // TODO
@@ -139,8 +143,10 @@ pub const FuseOperations = struct {
         }
 
         // Otherwise, grab the entry from our filetree hashmap
-        var entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
-        var inode = entry.inode();
+        const entry = squash.file_tree.get(path) orelse return fuse.MountError.NoEntry;
+        var inode = squash.image.getInode(
+            entry.id,
+        ) catch unreachable;
 
         return inode.statC() catch {
             return fuse.MountError.Io;

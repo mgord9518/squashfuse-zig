@@ -317,8 +317,13 @@ pub fn main() !void {
     // Append single threading flag
     try args.append("-s");
 
-    const file_tree = std.StringArrayHashMap(SquashFs.Inode.Walker.Entry).init(allocator);
-    FuseOperations.squash = FuseOperations.Squash{ .image = sqfs, .file_tree = file_tree };
+    const file_tree = std.StringArrayHashMap(SquashFs.Dir.Walker.Entry).init(allocator);
+    const open_files = std.AutoHashMap(u64, SquashFs.File).init(allocator);
+    FuseOperations.squash = FuseOperations.Squash{
+        .image = sqfs,
+        .file_tree = file_tree,
+        .open_files = open_files,
+    };
     defer sqfs.close();
 
     var extract_args_len: usize = 0;
@@ -356,9 +361,9 @@ pub fn main() !void {
         return;
     }
 
-    var root_inode = FuseOperations.squash.image.getRootInode();
+    var root = FuseOperations.squash.image.root();
 
-    var walker = try root_inode.walk(allocator);
+    var walker = try root.walk(allocator);
     defer walker.deinit();
 
     if (res.args.list != 0) {
@@ -368,7 +373,9 @@ pub fn main() !void {
         const colors = env_map.get("LS_COLORS") orelse "";
 
         while (try walker.next()) |entry| {
-            var inode = entry.inode();
+            var inode = sqfs.getInode(
+                entry.id,
+            ) catch unreachable;
 
             const color = try ls_colors.getEntryColor(entry, colors, &col_buf);
 
@@ -471,9 +478,9 @@ fn extractArchive(
     var stdout = io.getStdOut().writer();
     //var stderr = io.getStdErr().writer();
 
-    var root_inode = sqfs.getRootInode();
+    var root = sqfs.root();
 
-    var walker = try root_inode.walk(allocator);
+    var walker = try root.walk(allocator);
     defer walker.deinit();
 
     // Remove slashes at the beginning and end of path
@@ -501,11 +508,6 @@ fn extractArchive(
     }
 
     var file_found = false;
-
-    // TODO: flag to change buf size
-    const buf_size = 1024 * 1024;
-    const buf = try allocator.alloc(u8, buf_size);
-    defer allocator.free(buf);
 
     // Iterate over the SquashFS image and extract each item
     while (try walker.next()) |entry| {
@@ -543,8 +545,10 @@ fn extractArchive(
             try stdout.print("{s}\n", .{prefixed_dest});
         }
 
-        var inode = entry.inode();
-        inode.extract(buf, prefixed_dest) catch |err| {
+        var inode = sqfs.getInode(
+            entry.id,
+        ) catch unreachable;
+        inode.extract(prefixed_dest) catch |err| {
             //inode.extract(buf, prefixed_dest) catch unreachable;
             std.debug.print("extract error: {!}\n", .{err});
         };

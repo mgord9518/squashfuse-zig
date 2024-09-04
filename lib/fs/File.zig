@@ -11,7 +11,7 @@ const File = @This();
 
 pub const Kind = std.fs.File.Kind;
 
-inode: *SquashFs.Inode,
+inode: SquashFs.Inode,
 block_list: BlockListIterator,
 pos: u64,
 
@@ -23,15 +23,23 @@ const CacheEntry = struct {
     entry: SquashFs.Block.DataEntry,
 };
 
-pub fn initFromInode(inode: *SquashFs.Inode) File {
+pub fn close(file: *File) void {
+    file.cache.deinit();
+}
+
+pub fn initFromInode(inode: SquashFs.Inode) File {
     const cache = std.ArrayList(CacheEntry).init(inode.parent.allocator);
 
-    return .{
+    var file = File{
         .inode = inode,
-        .block_list = BlockListIterator.init(inode),
         .pos = 0,
         .cache = cache,
+        .block_list = undefined,
     };
+
+    file.block_list = BlockListIterator.init(&file.inode);
+
+    return file;
 }
 
 pub const GetSeekPosError = posix.SeekError || posix.FStatError;
@@ -45,7 +53,6 @@ fn getBlocklistCache(file: *File, idx: usize) ?CacheEntry {
     }
 
     while (file.block_list.idx <= idx) {
-        std.debug.print("Block cache {d}\n", .{file.block_list.idx});
         const entry = file.block_list.next() catch unreachable;
         if (entry == null) return null;
 
@@ -59,6 +66,20 @@ fn getBlocklistCache(file: *File, idx: usize) ?CacheEntry {
     return file.cache.items[idx];
 }
 
+pub const SeekableStream = std.io.SeekableStream(
+    File,
+    SeekError,
+    GetSeekPosError,
+    seekTo,
+    seekBy,
+    getPos,
+    getEndPos,
+);
+
+pub fn seekableStream(file: File) SeekableStream {
+    return .{ .context = file };
+}
+
 // TODO: handle invalid seeks
 pub fn seekTo(self: *File, pos: u64) SeekError!void {
     const end = self.getEndPos() catch unreachable;
@@ -70,8 +91,32 @@ pub fn seekTo(self: *File, pos: u64) SeekError!void {
     self.pos = pos;
 }
 
+pub fn seekBy(file: *File, pos: i64) SeekError!void {
+    const end = file.getEndPos() catch return SeekError.Unseekable;
+
+    if (file.pos + pos > end) {
+        return SeekError.InvalidSeek;
+    }
+
+    file.pos += pos;
+}
+
+pub fn seekFromEnd(file: *File, pos: i64) SeekError!void {
+    const end = file.getEndPos() catch return SeekError.Unseekable;
+    file.pos = end - pos;
+}
+
+pub fn getPos(file: File) GetSeekPosError!u64 {
+    return file.pos;
+}
+
 pub fn getEndPos(self: File) GetSeekPosError!u64 {
     return self.inode.xtra.reg.size;
+}
+
+pub const Reader = std.io.Reader(*File, ReadError, read);
+pub fn reader(self: *File) Reader {
+    return .{ .context = self };
 }
 
 pub const ReadError = std.fs.File.ReadError;
@@ -100,8 +145,7 @@ pub fn preadNoCopy(
     file: *File,
     offset: u64,
 ) PReadError![]const u8 {
-    var inode = file.inode;
-    var sqfs = inode.parent;
+    var sqfs = file.inode.parent;
 
     const file_size = try file.getEndPos();
     const block_size = sqfs.super_block.block_size;
@@ -134,11 +178,34 @@ pub fn preadNoCopy(
     }
 
     // End of file, possible fragment block
-    if (inode.xtra.reg.frag_idx == SquashFs.invalid_frag) return &.{};
+    if (file.inode.xtra.reg.frag_idx == SquashFs.invalid_frag) return &.{};
 
-    const block_data = inode.fragBlock() catch return error.SystemResources;
+    const block_data = file.fragBlock() catch return error.SystemResources;
 
     return block_data[read_off..];
+}
+
+pub fn fragBlock(
+    file: *File,
+) ![]u8 {
+    var sqfs = file.inode.parent;
+
+    if (file.inode.xtra.reg.frag_idx == SquashFs.invalid_frag) return error.Error;
+
+    const frag = try sqfs.frag_table.get(
+        file.inode.xtra.reg.frag_idx,
+    );
+
+    const block_data = try sqfs.dataCache(
+        &sqfs.frag_cache,
+        frag.start_block,
+        frag.block_header,
+    );
+
+    const offset = file.inode.xtra.reg.frag_off;
+    const size = file.inode.xtra.reg.size % sqfs.super_block.block_size;
+
+    return block_data[offset..][0..size];
 }
 
 pub const PReadError = ReadError || SeekError;

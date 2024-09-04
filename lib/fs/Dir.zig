@@ -59,9 +59,35 @@ fn populateInodeMapIfNull(sqfs: *SquashFs) !void {
 
 pub const OpenError = std.fs.Dir.OpenError;
 
-//pub fn openFile(dir: *Dir,
-//    sub_path: []const u8,
-//    )
+pub fn openFile(
+    dir: *Dir,
+    sub_path: []const u8,
+    opts: std.fs.File.OpenFlags,
+) OpenError!SquashFs.File {
+    _ = opts;
+
+    var sqfs = dir.sqfs;
+
+    populateInodeMapIfNull(sqfs) catch return error.SystemResources;
+
+    const resolved = std.fs.path.resolve(
+        sqfs.allocator,
+        &.{ dir.path.?, sub_path },
+    ) catch return error.SystemResources;
+    defer sqfs.allocator.free(resolved);
+
+    const inode_entry = sqfs.inode_map.?.get(
+        resolved,
+    ) orelse return error.FileNotFound;
+
+    const inode = sqfs.getInode(
+        inode_entry,
+    ) catch unreachable;
+
+    return SquashFs.File.initFromInode(
+        inode,
+    );
+}
 
 pub fn openDir(
     dir: *Dir,
@@ -187,8 +213,6 @@ pub const Iterator = struct {
             }
 
             it.dir.offset += @sizeOf(Header);
-            //try it.dir.cur.load(&it.dir.header);
-
             it.dir.header = try it.dir.cur.reader().readStructEndian(
                 Header,
                 .little,
