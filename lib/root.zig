@@ -150,6 +150,8 @@ pub const SquashFs = struct {
                 sqfs.super_block.export_table_start + opts.offset,
                 sqfs.super_block.inode_count,
             );
+        } else {
+            sqfs.export_table = null;
         }
 
         // TODO: XAttr support
