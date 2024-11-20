@@ -19,8 +19,8 @@ const FuseOperations = @import("fuse_operations.zig").FuseOperations;
 
 const version = std.SemanticVersion{
     .major = 0,
-    .minor = 1,
-    .patch = 1,
+    .minor = 4,
+    .patch = 4,
 };
 
 var env_map: std.process.EnvMap = undefined;

@@ -42,6 +42,7 @@ pub fn initFromInode(inode: SquashFs.Inode) File {
     return file;
 }
 
+pub const OpenError = std.fs.Dir.OpenError;
 pub const GetSeekPosError = posix.SeekError || posix.FStatError;
 pub const SeekError = posix.SeekError || error{InvalidSeek};
 

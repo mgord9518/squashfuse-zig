@@ -63,7 +63,7 @@ pub fn openFile(
     dir: *Dir,
     sub_path: []const u8,
     opts: std.fs.File.OpenFlags,
-) OpenError!SquashFs.File {
+) SquashFs.File.OpenError!SquashFs.File {
     _ = opts;
 
     var sqfs = dir.sqfs;
@@ -80,13 +80,25 @@ pub fn openFile(
         resolved,
     ) orelse return error.FileNotFound;
 
-    const inode = sqfs.getInode(
+    var inode = sqfs.getInode(
         inode_entry,
     ) catch unreachable;
 
-    return SquashFs.File.initFromInode(
-        inode,
-    );
+    if (inode.kind == .sym_link) {
+        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+        const target = inode.readLink(&buf) catch return error.Unexpected;
+
+        const new_inode_entry = sqfs.inode_map.?.get(
+            target,
+        ) orelse return error.FileNotFound;
+
+        const new_inode = sqfs.getInode(new_inode_entry) catch unreachable;
+
+        return SquashFs.File.initFromInode(new_inode);
+    }
+
+    return SquashFs.File.initFromInode(inode);
 }
 
 pub fn openDir(
