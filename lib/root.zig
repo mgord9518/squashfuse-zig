@@ -77,6 +77,7 @@ pub const SquashFs = struct {
         opts: Options,
     ) !*SquashFs {
         const sqfs = try allocator.create(SquashFs);
+        errdefer allocator.destroy(sqfs);
 
         sqfs.inode_map = null;
         sqfs.opts = opts;
@@ -90,6 +91,7 @@ pub const SquashFs = struct {
         );
 
         sqfs.zero_block = try allocator.alloc(u8, sqfs.super_block.block_size);
+        errdefer allocator.free(sqfs.zero_block);
         @memset(sqfs.zero_block, 0);
 
         if (!std.mem.eql(u8, &sqfs.super_block.magic, SquashFs.magic)) {
@@ -112,6 +114,7 @@ pub const SquashFs = struct {
             sqfs.opts.cached_metadata_blocks,
             .{ .block_size = SquashFs.metadata_block_size },
         );
+        errdefer sqfs.md_cache.deinit();
 
         sqfs.data_cache = try Cache(
             []u8,
@@ -120,6 +123,7 @@ pub const SquashFs = struct {
             sqfs.opts.cached_data_blocks,
             .{ .block_size = sqfs.super_block.block_size },
         );
+        errdefer sqfs.data_cache.deinit();
 
         sqfs.frag_cache = try Cache(
             []u8,
@@ -128,6 +132,7 @@ pub const SquashFs = struct {
             sqfs.opts.cached_fragment_blocks,
             .{ .block_size = sqfs.super_block.block_size },
         );
+        errdefer sqfs.frag_cache.deinit();
 
         sqfs.id_table = try Table(u32).init(
             allocator,
@@ -135,6 +140,7 @@ pub const SquashFs = struct {
             sqfs.super_block.id_table_start + opts.offset,
             sqfs.super_block.id_count,
         );
+        errdefer sqfs.id_table.deinit();
 
         sqfs.frag_table = try Table(Block.FragmentEntry).init(
             allocator,
@@ -142,6 +148,7 @@ pub const SquashFs = struct {
             sqfs.super_block.fragment_table_start + opts.offset,
             sqfs.super_block.fragment_entry_count,
         );
+        errdefer sqfs.frag_table.deinit();
 
         if (sqfs.super_block.export_table_start != SquashFs.invalid_block) {
             sqfs.export_table = try Table(u64).init(
@@ -152,6 +159,12 @@ pub const SquashFs = struct {
             );
         } else {
             sqfs.export_table = null;
+        }
+
+        errdefer {
+            if (sqfs.export_table) |*export_table| {
+                export_table.deinit();
+            }
         }
 
         // TODO: XAttr support
@@ -219,7 +232,7 @@ pub const SquashFs = struct {
         };
 
         inode.base = try cur.reader().readStructEndian(
-            SuperBlock.InodeBase,
+            SuperBlock.BaseInode,
             .little,
         );
 
@@ -338,18 +351,8 @@ pub const SquashFs = struct {
 
         return .{
             .sqfs = sqfs,
-            .cur = metadata.Cursor.init(
-                sqfs,
-                .directory_table,
-                .{
-                    .block = inode.xtra.dir.start_block,
-                    .offset = inode.xtra.dir.offset,
-                },
-            ),
-
-            .offset = 0,
+            .id = sqfs.super_block.root_inode_id,
             .size = inode.xtra.dir.size -| 3,
-            .header = std.mem.zeroes(SquashFs.Dir.Header),
             .path = sqfs.allocator.alloc(u8, 0) catch unreachable,
         };
     }

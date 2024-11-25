@@ -1,12 +1,5 @@
-*.a
-*.so
-*.o
-*.old
-*.bak
-a.out
 *.sqfs
 zig-out
 .zig-cache
 mnt
-benchmark
 squashfs-root

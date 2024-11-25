@@ -42,6 +42,14 @@ pub fn initFromInode(inode: SquashFs.Inode) File {
     return file;
 }
 
+pub fn stat(self: *File) !std.fs.File.Stat {
+    return self.inode.stat();
+}
+
+pub fn statC(self: *File) !std.os.linux.Stat {
+    return self.inode.statC();
+}
+
 pub const OpenError = std.fs.Dir.OpenError;
 pub const GetSeekPosError = posix.SeekError || posix.FStatError;
 pub const SeekError = posix.SeekError || error{InvalidSeek};
@@ -266,7 +274,6 @@ pub const InternalKind = enum(u4) {
 };
 
 pub const BlockListIterator = extern struct {
-    inode: *SquashFs.Inode,
     idx: usize,
     count: usize,
     cur: metadata.Cursor,
@@ -277,7 +284,6 @@ pub const BlockListIterator = extern struct {
 
     pub fn init(inode: *SquashFs.Inode) BlockListIterator {
         return .{
-            .inode = inode,
             .count = BlockListIterator.getTotalBlockCount(inode),
             .idx = 0,
             .cur = inode.next,

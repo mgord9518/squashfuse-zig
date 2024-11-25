@@ -245,39 +245,20 @@ fn initDecompressionSymbolDynlib(
     comptime T: type,
     comptime library_name: []const u8,
 ) !void {
-    var found = false;
+    const path = std.fmt.comptimePrint(
+        "{s}.so",
+        .{library_name},
+    );
 
-    inline for (.{
-        "/lib/{s}.so.1",
-        "/lib64/{s}.so.1",
-        "/usr/lib/{s}.so.1",
-        "/usr/lib64/{s}.so.1",
-    }) |fmt| {
-        const path = std.fmt.comptimePrint(
-            fmt,
-            .{library_name},
-        );
+    // TODO: close libs
+    var lib = try DynLib.open(path);
 
-        // TODO: close libs
-        var lib = DynLib.open(path) catch |err| {
-            switch (err) {
-                error.FileNotFound => comptime continue,
-                else => return err,
-            }
-        };
-
-        inline for (@typeInfo(T.required_symbols).Struct.decls) |decl| {
-            @field(T.required_symbols, decl.name) = lib.lookup(
-                @TypeOf(@field(T.required_symbols, decl.name)),
-                decl.name,
-            ) orelse return error.SymbolNotFound;
-        }
-
-        found = true;
-        break;
+    inline for (@typeInfo(T.required_symbols).Struct.decls) |decl| {
+        @field(T.required_symbols, decl.name) = lib.lookup(
+            @TypeOf(@field(T.required_symbols, decl.name)),
+            decl.name,
+        ) orelse return error.SymbolNotFound;
     }
-
-    if (!found) return error.DynLibNotFound;
 }
 
 pub const FakeDecoder = struct {

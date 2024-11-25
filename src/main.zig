@@ -20,7 +20,7 @@ const FuseOperations = @import("fuse_operations.zig").FuseOperations;
 const version = std.SemanticVersion{
     .major = 0,
     .minor = 4,
-    .patch = 4,
+    .patch = 5,
 };
 
 var env_map: std.process.EnvMap = undefined;
@@ -319,12 +319,22 @@ pub fn main() !void {
 
     const file_tree = std.StringArrayHashMap(SquashFs.Dir.Walker.Entry).init(allocator);
     const open_files = std.AutoHashMap(u64, SquashFs.File).init(allocator);
+    const open_directories = std.AutoHashMap(u64, SquashFs.Dir).init(allocator);
+
     FuseOperations.squash = FuseOperations.Squash{
         .image = sqfs,
         .file_tree = file_tree,
         .open_files = open_files,
+        .open_directories = open_directories,
     };
     defer sqfs.close();
+
+    // Make sure root is always open
+    {
+        const dir = FuseOperations.squash.image.root();
+        const inode = try FuseOperations.squash.image.getInode(dir.id);
+        _ = try FuseOperations.squash.open_directories.put(inode.base.inode_number, dir);
+    }
 
     var extract_args_len: usize = 0;
     for (res.args.extract) |_| {

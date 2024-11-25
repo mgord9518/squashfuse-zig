@@ -1,12 +1,7 @@
-// Tests basic functionality (walking, reading) for all compression
-// algos
-
 const std = @import("std");
-const fs = std.fs;
 const expect = std.testing.expect;
 const squashfuse = @import("squashfuse");
 const SquashFs = squashfuse.SquashFs;
-const allocator = std.testing.allocator;
 
 const compression_algos = &.{
     "xz",
@@ -18,7 +13,7 @@ const compression_algos = &.{
 test "Dir.openDir" {
     const file = try std.fs.cwd().openFile("test/tree_zlib.sqfs", .{});
     defer file.close();
-    var sqfs = try SquashFs.open(allocator, file, .{});
+    var sqfs = try SquashFs.open(std.testing.allocator, file, .{});
     defer sqfs.close();
 
     var root_dir = sqfs.root();
@@ -40,12 +35,12 @@ test "Dir.walk" {
 
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
-        var sqfs = try SquashFs.open(allocator, file, .{});
+        var sqfs = try SquashFs.open(std.testing.allocator, file, .{});
         defer sqfs.close();
 
         var root = sqfs.root();
 
-        var walker = try root.walk(allocator);
+        var walker = try root.walk(std.testing.allocator);
         defer walker.deinit();
 
         var idx: usize = 0;
@@ -71,12 +66,12 @@ test "Inode.Stat" {
 
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
-        var sqfs = try SquashFs.open(allocator, file, .{});
+        var sqfs = try SquashFs.open(std.testing.allocator, file, .{});
         defer sqfs.close();
 
         var root = sqfs.root();
 
-        var walker = try root.walk(allocator);
+        var walker = try root.walk(std.testing.allocator);
         defer walker.deinit();
 
         while (try walker.next()) |entry| {
@@ -140,42 +135,15 @@ test "Inode.Stat" {
 //}
 
 fn testRead(sqfs: *SquashFs) !void {
-    var file_tree_hashmap = std.StringArrayHashMap(SquashFs.Dir.Walker.Entry).init(allocator);
-    defer file_tree_hashmap.deinit();
-
     var root = sqfs.root();
-    var walker = try root.walk(allocator);
-    defer walker.deinit();
-
-    while (try walker.next()) |entry| {
-        // Allocate keys because entry.path gets deleted on every call
-        // of `walker.next()`
-        const alloc_path = try allocator.dupe(u8, entry.path);
-        try file_tree_hashmap.put(alloc_path, entry);
-    }
-
-    // As the hashmap keys were allocated, free them at function exit
-    const keys = file_tree_hashmap.keys();
-    defer for (keys) |key| {
-        allocator.free(key);
-    };
-
     var buf: [1024 * 65]u8 = undefined;
 
-    // The entry should never be null because the walk test checks that
-    // all files are found
-    var inode = sqfs.getInode(
-        file_tree_hashmap.get("1/TEST").?.id,
-    ) catch unreachable;
-    var file = SquashFs.File.initFromInode(inode);
+    var file = try root.openFile("/1/TEST", .{});
     var read_bytes = try file.reader().readAll(&buf);
     try expect(std.mem.eql(u8, buf[0..read_bytes], "TEST"));
     file.close();
 
-    inode = sqfs.getInode(
-        file_tree_hashmap.get("2/another dir/sparse_file").?.id,
-    ) catch unreachable;
-    file = SquashFs.File.initFromInode(inode);
+    file = try root.openFile("2/another dir/sparse_file", .{});
     read_bytes = try file.reader().readAll(&buf);
     try expect(std.mem.eql(
         u8,
@@ -184,10 +152,7 @@ fn testRead(sqfs: *SquashFs) !void {
     ));
     file.close();
 
-    inode = sqfs.getInode(
-        file_tree_hashmap.get("2/text").?.id,
-    ) catch unreachable;
-    file = SquashFs.File.initFromInode(inode);
+    file = try root.openFile("../../2/text", .{});
     read_bytes = try file.reader().readAll(&buf);
     try expect(std.mem.eql(
         u8,
@@ -197,58 +162,45 @@ fn testRead(sqfs: *SquashFs) !void {
     file.close();
 }
 
-test "read" {
+test "File.read" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
-        var sqfs = try SquashFs.open(allocator, file, .{});
+        var sqfs = try SquashFs.open(std.testing.allocator, file, .{});
         defer sqfs.close();
 
         try testRead(sqfs);
     }
 }
 
-test "read link" {
+test "Dir.readLink" {
     inline for (compression_algos) |algo| {
         const file_path = std.fmt.comptimePrint("test/tree_{s}.sqfs", .{algo});
 
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
-        var sqfs = try SquashFs.open(allocator, file, .{});
+        var sqfs = try SquashFs.open(std.testing.allocator, file, .{});
         defer sqfs.close();
 
         var root = sqfs.root();
 
-        var walker = try root.walk(allocator);
-        defer walker.deinit();
+        const goal = "2/text";
 
-        while (try walker.next()) |entry| {
-            if (!std.mem.eql(u8, entry.path, "symlink")) {
-                continue;
-            }
+        var buf: [goal.len]u8 = undefined;
+        const link_target = try root.readLink("2/../1/../../../symlink", &buf);
 
-            const goal = "2/text";
+        try expect(std.mem.eql(
+            u8,
+            link_target,
+            goal,
+        ));
 
-            var buf: [goal.len]u8 = undefined;
-            var inode = sqfs.getInode(
-                entry.id,
-            ) catch unreachable;
-
-            const link_target = try inode.readLink(&buf);
-
-            try expect(std.mem.eql(
-                u8,
-                link_target,
-                goal,
-            ));
-
-            var small_buf: [goal.len - 1]u8 = undefined;
-            _ = inode.readLink(&small_buf) catch |err| {
-                try expect(err == error.NoSpaceLeft);
-            };
-        }
+        var small_buf: [goal.len - 1]u8 = undefined;
+        _ = root.readLink("./..////symlink", &small_buf) catch |err| {
+            try expect(err == error.NoSpaceLeft);
+        };
     }
 }
 
@@ -272,4 +224,4 @@ const file_tree = &[_][]const u8{
     "symlink",
 };
 
-const text_contents = @embedFile("test.zig");
+const text_contents = @embedFile("lorem.txt");

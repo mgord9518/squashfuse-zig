@@ -30,7 +30,7 @@ pub const SuperBlock = extern struct {
         uncompressed_data: bool,
 
         // `check` flag; unused in SquashFS 4.0+
-        _UNUSED: u1 = undefined,
+        _2: u1 = undefined,
 
         uncompressed_fragments: bool,
         no_fragments: bool,
@@ -42,10 +42,10 @@ pub const SuperBlock = extern struct {
         compressor_options: bool,
         uncompressed_ids: bool,
 
-        _: u4 = undefined,
+        _12: u4 = undefined,
     };
 
-    pub const InodeBase = extern struct {
+    pub const BaseInode = extern struct {
         kind: u16,
         mode: u16,
         uid: u16,
@@ -55,7 +55,7 @@ pub const SuperBlock = extern struct {
     };
 
     pub const DirInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         start_block: u32,
         nlink: u32,
         size: u16,
@@ -77,7 +77,7 @@ pub const SuperBlock = extern struct {
     };
 
     pub const FileInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         start_block: u32,
         frag_idx: u32,
         frag_off: u32,
@@ -98,13 +98,13 @@ pub const SuperBlock = extern struct {
     };
 
     pub const SymLinkInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         nlink: u32,
         size: u32,
     };
 
     pub const DevInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         nlink: u32,
         dev: Device,
 
@@ -133,12 +133,12 @@ pub const SuperBlock = extern struct {
     };
 
     pub const IpcInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         nlink: u32,
     };
 
     pub const LDirInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         nlink: u32,
         size: u32,
         start_block: u32,
@@ -149,7 +149,7 @@ pub const SuperBlock = extern struct {
     };
 
     pub const LFileInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         start_block: u64,
         size: u64,
         sparse: u64,
@@ -160,7 +160,7 @@ pub const SuperBlock = extern struct {
     };
 
     pub const LDevInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         nlink: u32,
         dev: DevInode.Device,
         xattr: u32,
@@ -175,7 +175,7 @@ pub const SuperBlock = extern struct {
     };
 
     pub const LIpcInode = extern struct {
-        base: InodeBase,
+        base: BaseInode,
         nlink: u32,
         xattr: u32,
     };

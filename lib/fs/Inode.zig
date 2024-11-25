@@ -20,9 +20,8 @@ const Inode = @This();
 
 parent: *SquashFs,
 kind: SquashFs.File.Kind,
-pos: u64 = 0,
 
-base: SquashFs.SuperBlock.InodeBase,
+base: SquashFs.SuperBlock.BaseInode,
 xattr: u32,
 next: metadata.Cursor,
 
@@ -41,23 +40,23 @@ pub const TableEntry = packed struct(u64) {
 };
 
 /// Reads the link target into `buf`
-pub fn readLink(inode: *Inode, buf: []u8) ![]const u8 {
-    if (inode.kind != .sym_link) {
+pub fn readLink(self: *Inode, buffer: []u8) ![]u8 {
+    if (self.kind != .sym_link) {
         // TODO: rename
         return error.NotLink;
     }
 
-    const len = inode.xtra.symlink.size;
+    const len = self.xtra.symlink.size;
 
-    if (len > buf.len) {
+    if (len > buffer.len) {
         return error.NoSpaceLeft;
     }
 
-    var cur = inode.next;
+    var cur = self.next;
 
-    _ = try cur.read(buf[0..len]);
+    _ = try cur.read(buffer[0..len]);
 
-    return buf[0..len];
+    return buffer[0..len];
 }
 
 pub fn readLinkZ(self: *Inode, buf: []u8) ![:0]const u8 {

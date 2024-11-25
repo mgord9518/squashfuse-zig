@@ -234,7 +234,7 @@ pub fn build(b: *std.Build) !void {
                     "-p",
                     "2/another\\ dir/sparse_file f 644 0 0 head -c 65536 /dev/zero",
                     "-p",
-                    "2/text f 644 0 0 cat test/test.zig",
+                    "2/text f 644 0 0 cat test/lorem.txt",
                     "-p",
                     "broken_symlink s 644 0 0 I_DONT_EXIST",
                     "-p",

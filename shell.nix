@@ -6,5 +6,7 @@ pkgs.mkShell {
 
     # Required for building test SquashFS images
     squashfsTools
+
+    lz4
   ];
 }
