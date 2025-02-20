@@ -1,6 +1,6 @@
 .{
     .name = "squashfuse-zig",
-    .version = "0.4.5",
+    .version = "0.5.0",
 
     .paths = [][]const u8{
         "build.zig",
@@ -11,31 +11,33 @@
 
     .dependencies = .{
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/c0193e9247335a6c1688b946325060289405de2a.tar.gz",
-            .hash = "12207ee987ce045596cb992cfb15b0d6d9456e50d4721c3061c69dabc2962053644d",
+            .url = "git+https://github.com/Hejsil/zig-clap#0.9.1",
+            .hash = "122062d301a203d003547b414237229b09a7980095061697349f8bef41be9c30266b",
         },
         .fuse = .{
-            .url = "https://github.com/mgord9518/libfuse-zig/archive/refs/tags/continuous.tar.gz",
+            .url = "git+https://github.com/mgord9518/libfuse-zig#067741f27b6ba46c3950eb0aeedac3f9ca2b3240",
             .hash = "122080b505c126987851206c008bbdda57d6bab07c0eced8331cda2b95f34721d768",
+        },
+        .lz4 = .{
+            .url = "git+https://github.com/mgord9518/lz4-zig#bdf473d2ecfcc13719ad2946dc1b29cbff847f79",
+            .hash = "1220a63e23a02e514a8ca333662ff84d08e9f2233560c485d2d99e764a09508aa953",
         },
         // TODO: update libdeflate
         .libdeflate = .{
-            .url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz",
+            .url = "git+https://github.com/ebiggers/libdeflate#v1.19",
             .hash = "12209f6d3313777edb090add7dcb02c2ee7c10b65c62b9c401ce90148c0f44387d99",
-            //.url = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.21.tar.gz",
-            //.hash = "12203af6f4088f9fb213eb6880f96c61065f201953a90df4da9a875dfbee18adf8a9",
         },
         .libzstd = .{
-            .url = "https://github.com/facebook/zstd/archive/refs/tags/v1.5.6.tar.gz",
-            .hash = "1220cc97075e331a87cb201c03a018a1522325d6aa844619a461462fbfdaedb38c42",
+            .url = "git+https://github.com/facebook/zstd#v1.5.7",
+            .hash = "1220001b05f0bec9e5fda3971462d94de602bb458186e117afdeaed3ea36cb5677ef",
         },
         .liblz4 = .{
-            .url = "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz",
+            .url = "git+https://github.com/lz4/lz4#v1.10.0",
             .hash = "1220fa6e67d18c0aef6009ec2fc0d8c5b5e2371544fc1e874695311739ccd8f8b0d3",
         },
         .libxz = .{
-            .url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.6.2.tar.gz",
-            .hash = "12200d749fc0f51ac0231f6ce241eccfce7383b581419ce90393d5ab765fbc42d637",
+            .url = "git+https://github.com/tukaani-project/xz#v5.6.4",
+            .hash = "1220b110b8e7113ad2a41d0691bf2eb237d3aac2d174e6920ab2cfa940fce63b90e2",
         },
     },
 }

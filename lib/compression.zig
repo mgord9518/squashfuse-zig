@@ -181,9 +181,11 @@ pub fn getDecompressor(allocator: std.mem.Allocator, kind: Compression) SquashFs
             }
         },
         .lz4 => {
+            const lz4_zig = @import("compression/lz4_zig.zig");
             const liblz4 = @import("compression/lz4_liblz4.zig");
 
             switch (build_options.lz4_decompressor) {
+                .lzig4 => return Decompressor.init(lz4_zig, allocator),
                 .liblz4_static, .liblz4_dynamic => {
                     initDecompressionSymbolStatic(liblz4) catch return error.Error;
                 },

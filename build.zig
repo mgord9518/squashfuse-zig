@@ -45,12 +45,21 @@ pub fn build(b: *std.Build) !void {
         .strip = strip,
     });
 
+    const lz4_dep = b.dependency("lz4", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const squashfuse_module = b.addModule("squashfuse", .{
         .root_source_file = b.path("lib/root.zig"),
         .imports = &.{
             .{
                 .name = "build_options",
                 .module = lib_options.createModule(),
+            },
+            .{
+                .name = "lz4",
+                .module = lz4_dep.module("lzig4"),
             },
         },
     });
@@ -63,15 +72,6 @@ pub fn build(b: *std.Build) !void {
     const fuse_dep = b.dependency("fuse", .{
         .target = target,
         .optimize = optimize,
-    });
-
-    const fuse_module = b.addModule(
-        "fuse",
-        .{ .root_source_file = fuse_dep.module("fuse").root_source_file },
-    );
-
-    const clap_module = b.addModule("clap", .{
-        .root_source_file = clap_dep.path("clap.zig"),
     });
 
     if (enable_fuse) {
@@ -144,7 +144,7 @@ pub fn build(b: *std.Build) !void {
             exe.linkSystemLibrary("lz4");
             unit_tests.linkSystemLibrary("lz4");
         },
-        .liblz4_dynlib => {},
+        .liblz4_dynlib, .lzig4 => {},
     }
 
     switch (zstd_decompressor) {
@@ -169,8 +169,8 @@ pub fn build(b: *std.Build) !void {
 
     exe.root_module.addImport("squashfuse", squashfuse_module);
     exe.root_module.addImport("build_options", exe_options.createModule());
-    exe.root_module.addImport("fuse", fuse_module);
-    exe.root_module.addImport("clap", clap_module);
+    exe.root_module.addImport("fuse", fuse_dep.module("fuse"));
+    exe.root_module.addImport("clap", clap_dep.module("clap"));
 
     unit_tests.root_module.addImport("squashfuse", squashfuse_module);
 
@@ -489,6 +489,7 @@ const ZstdDecompressor = enum {
 };
 
 const Lz4Decompressor = enum {
+    lzig4,
     liblz4_dynamic,
     liblz4_dynlib,
     liblz4_static,
