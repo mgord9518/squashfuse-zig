@@ -6,6 +6,8 @@
 #
 # REQUIRES: zig tar xz zip
 
+set -o pipefail
+
 [ -z $OPTIMIZE ] && OPTIMIZE=ReleaseFast
 [ -z $ARCH     ] && ARCH=$(uname -m)
 [ -z $OS       ] && OS='linux'

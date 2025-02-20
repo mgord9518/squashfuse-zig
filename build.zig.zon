@@ -33,7 +33,7 @@
         },
         .liblz4 = .{
             .url = "git+https://github.com/lz4/lz4#v1.10.0",
-            .hash = "1220fa6e67d18c0aef6009ec2fc0d8c5b5e2371544fc1e874695311739ccd8f8b0d3",
+            .hash = "1220806155b365608bdfec2a076502c51a8127af1d800b5512d3ee93601a1aca7765",
         },
         .libxz = .{
             .url = "git+https://github.com/tukaani-project/xz#v5.6.4",
