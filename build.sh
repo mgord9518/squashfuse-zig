@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Basic build script for CI
 #
 # Not recommended to use for normal installs, a simple `zig build` is
